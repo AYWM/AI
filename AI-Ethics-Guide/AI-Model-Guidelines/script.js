@@ -1,7 +1,7 @@
 // You can add interactive features here, such as toggling visibility of detailed content
 document.addEventListener('DOMContentLoaded', function() {
     
-    fetch('https://script.google.com/macros/s/AKfycbyjO968g4tuex86kWcpmF7ivzQU0C4uCCwLqDSd9lAcELYHj-obFXAhCPcKYMmpzna3Xg/exec')
+    fetch('https://script.google.com/macros/s/AKfycbxJA_qdZxIoCtHi8IOVS23kGNSYb4Z6AUdDxxprWAeTEV2phky3B7kDZh4U87TD19IB8Q/exec')
     .then(response => response.json())
     .then(data => {
         console.log(data);
