@@ -15,13 +15,15 @@
                 <li><a href="#how-it-works">How the Model Works</a></li>
                 <li><a href="#identify-biases">Identify Potential Biases</a></li>
                 <li><a href="#ethical-implications">Ethical Implications</a></li>
+                <li><a href="#quiz">AI Knowledge Quiz</a></li>
+                <li><a href="#feedback">Feedback</a></li>
             </ul>
         </nav>
     </header>
     <main>
-        <section id="how-it-works">
+        <section id="how-it-works" class="interactive">
             <h2>How the Model Works</h2>
-            <p>Understanding the inner workings of an AI model involves several steps:</p>
+            <p class="hidden">Understanding the inner workings of an AI model involves several steps:</p>
             <ul>
                 <li>
                     <strong>Review the Source Code:</strong>
@@ -39,9 +41,9 @@
             </ul>
         </section>
 
-        <section id="identify-biases">
+        <section id="identify-biases" class="interactive">
             <h2>Identify Potential Biases</h2>
-            <p>Identifying biases in AI models is crucial for fairness and accuracy:</p>
+            <p class="hidden">Identifying biases in AI models is crucial for fairness and accuracy:</p>
             <ul>
                 <li>
                     <strong>Analyze Training Data:</strong>
@@ -58,9 +60,9 @@
             </ul>
         </section>
 
-        <section id="ethical-implications">
+        <section id="ethical-implications" class="interactive">
             <h2>Ethical Implications</h2>
-            <p>Assessing the ethical implications of using an AI model involves several considerations:</p>
+            <p class="hidden">Assessing the ethical implications of using an AI model involves several considerations:</p>
             <ul>
                 <li>
                     <strong>Consider the Use Case:</strong>
@@ -81,11 +83,21 @@
             </ul>
         </section>
 
+        <section id="quiz">
+            <h2>AI Knowledge Quiz</h2>
+            <div id="quiz-container">
+                <p><strong>Question 1:</strong> What is an AI model trained on?</p>
+                <button class="quiz-btn" onclick="checkAnswer(this, 'Correct!')">Data</button>
+                <button class="quiz-btn" onclick="checkAnswer(this, 'Incorrect!')">Random Numbers</button>
+            </div>
+        </section>
+
         <section id="feedback">
             <h2>Leave Your Feedback</h2>
             <p>We value your input! Please leave your feedback using the form below:</p>
-            <iframe src="https://docs.google.com/forms/d/e/1FAIpQLScBQeBhfUv2Ge_LoasQpESsJBpZmkdHUqHXfHXqeqqswUCUEA/viewform?embedded=true" width="600" height="400" frameborder="0" marginheight="0" marginwidth="0">Loading…</iframe>
+            <iframe src="https://docs.google.com/forms/d/e/1FAIpQLScBQeBhfUv2Ge_LoasQpESsJBpZmkdHUqHXfHXqeqqswUCUEA/viewform?embedded=true" width="100%" height="600" frameborder="0" marginheight="0" marginwidth="0">Loading…</iframe>
         </section>
+        
         <section id="viewers-comments">
             <h2>Viewers Comments</h2>
             <p>Here are some of the comments and feedback we have received:</p>
@@ -96,7 +108,7 @@
 
     </main>
     <footer>
-        <p>&copy; 2023 AI Model Guidelines</p>
+        <p>&copy; 2025 AI Model Guidelines</p>
     </footer>
     <script src="script.js"></script>
 </body>
