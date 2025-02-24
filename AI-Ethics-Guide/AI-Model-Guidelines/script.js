@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const commentsList = document.getElementById('comments-list');
         data.forEach(comment => {
             const listItem = document.createElement('li');
-            listItem.textContent = `"${comment.Feedback}" - ${comment.Name} ${comment.Email}`;
+            listItem.textContent = `"${comment.Feedback}" - ${comment.Name}${isInvalid(comment.Email) ? '': ' ('+comment.Email+')'}`;
             commentsList.appendChild(listItem);
         });
     })
@@ -22,3 +22,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+function isInvalid(obj) {
+    return (
+        obj === null ||                      // Null check
+        obj === undefined ||                 // Undefined check
+        (typeof obj === "object" && Object.keys(obj).length === 0) || // Empty object {}
+        (typeof obj === "string" && obj.trim() === "") || // Empty string ""
+        (Array.isArray(obj) && obj.length === 0) // Empty array []
+    );
+}
