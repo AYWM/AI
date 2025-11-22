@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+        <!-- Tom Select CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.css" rel="stylesheet">
+
+    <?!= include('CSS'); ?>
+  </head>
+  <body>
+    <div class="container">
+      <h4 class="center-align">AI Expense Logger</h4>
+
+      <div id="loading" class="progress" style="display: none;">
+          <div class="indeterminate"></div>
+      </div>
+      
+      <div class="row card-panel" id="inputArea">
+        <div class="form-group col s12"> <!-- Use our custom class -->
+          <textarea id="userInput" placeholder="Type or paste receipt text, or just upload a file to start..."></textarea>
+          <label class="form-label" for="userInput">Expense Input / Ask a Question</label>
+        </div>
+        <div class="col s12 center-align action-buttons">
+            <button class="btn-floating waves-effect waves-light tooltipped" data-position="bottom" data-tooltip="Upload Receipt (Image/PDF)" onclick="document.getElementById('fileUpload').click();"><i class="material-icons">attach_file</i></button>
+            <input type="file" id="fileUpload" style="display:none;" accept="image/*,application/pdf" onchange="handleFileUpload(this.files[0])">
+            
+            <button class="btn-floating waves-effect waves-light tooltipped" data-position="bottom" data-tooltip="Use Camera" id="cameraBtn" onclick="startCamera()" ><i class="material-icons">photo_camera</i></button>
+            <button class="btn-floating waves-effect waves-light tooltipped" data-position="bottom" data-tooltip="Record Audio" id="audioBtn" onclick="toggleAudioRecording()"><i class="material-icons">mic</i></button>
+            
+            <button class="btn-floating waves-effect waves-light tooltipped" data-position="bottom" data-tooltip="Fetch From Email" id="emailFetchBtn" onclick="openEmailSearchModal()">
+              <i class="material-icons">email</i>
+            </button>
+            <button class="btn-floating waves-effect waves-light tooltipped" data-position="bottom" data-tooltip="Manual Form" id="fillFormBtn">
+              <i class="material-icons">assignment</i>
+            </button>
+            <button class="btn waves-effect waves-light blue right" id="openAskAiModalBtn">
+                <i class="material-icons right">auto_awesome</i>Ask AI<i class="material-icons right">question_answer</i>
+            </button>
+            <button class="btn waves-effect waves-light right" id="processInputBtn" onclick="processInput()">
+              Process<i class="material-icons right">send</i>
+            </button>
+        </div>
+      </div>
+      
+      <p id="statusMessage" class="status-box"></p>
+      
+      <!-- Camera View: to display the camera stream (initially hidden or styled). -->
+      <div id="cameraView" style="display:none;">
+        <video id="videoStream" width="100%" autoplay playsinline></video>
+        <canvas id="photoCanvas" style="display:none;"></canvas>
+        <button class="btn waves-effect waves-light" onclick="capturePhoto()">Capture Photo</button>
+        <button class="btn waves-effect waves-light orange" onclick="stopCamera()">Close Camera</button>
+      </div>
+
+      <!-- AI Answer Area -->
+      <div id="aiAnswerArea" style="display:none;">
+          <h6><i class="material-icons">smart_toy</i>AI Response</h6>
+          <button class="copy-btn" onclick="copyAIAnswer()" title="Copy to clipboard">
+              <i class="material-icons">content_copy</i>
+          </button>
+          <div id="aiAnswerContent"></div>
+      </div>
+
+      <!-- Expense Summary Area -->
+      <div id="expenseSummaryArea" class="card-panel" style="display:none;">
+          <h5><i class="material-icons">receipt_long</i>Confirm Expense Details</h5>
+          
+          <div class="form-row">
+              <div class="form-group">
+                  <label class="form-label" for="expDate">Date of Expense (तिथि)</label>
+                  <input id="expDate" type="date" class="form-input">
+                  <div class="error-message">Date is required</div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="form-label" for="expCostCenter">Cost Center (केंद्र)</label>
+                  <!-- <select id="expCostCenter" class="form-select"> -->
+                  <select id="expCostCenter">
+                      <option value="">Choose Cost Center</option>
+                  </select>
+                  <div class="error-message">Cost Center is required</div>
+              </div>
+          </div>
+
+          <div class="form-group">
+              <label class="form-label" for="expCombinedCategory">Expense Category</label>
+              <!-- <select id="expCombinedCategory" class="form-select"> -->
+              <select id="expCombinedCategory">
+                  <option value="">Choose Expense Category</option>
+              </select>
+              <div class="error-message">Expense Category is required</div>
+          </div>
+
+          <!-- Hidden fields for primary and subcategory -->
+          <input type="hidden" id="expPrimaryCategory">
+          <input type="hidden" id="expSubcategory">
+
+          <div class="form-group vendor-container">
+              <label class="form-label" for="expVendor">Vendor/Merchant (विक्रेता/व्यापारी)</label>
+              <!-- <select id="expVendor" class="form-select"> -->
+              <select id="expVendor">
+                  <option value="">Choose Vendor</option>
+              </select>
+              <input type="text" id="expVendorCustom" class="form-input" placeholder="Type new vendor name">
+              <div class="error-message">Vendor is required</div>
+          </div>
+
+          <div class="form-group">
+              <label class="form-label" for="expDescription">Item/Description (ख़रीदारि अथवा सामान की विवरण)</label>
+              <textarea id="expDescription" class="form-textarea" placeholder="Describe the expense..."></textarea>
+              <div class="error-message">Description is required</div>
+          </div>
+
+          <div class="form-row">
+              <div class="form-group">
+                  <label class="form-label" for="expAmount">Amount in Default Currency (खर्च का मूल्य)</label>
+                  <input id="expAmount" type="number" step="0.01" class="form-input" placeholder="0.00">
+                  <div class="error-message">Amount is required</div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="form-label" for="expPaymentMethod">Payment Method (भुगतान विधि)</label>
+                  <!-- <select id="expPaymentMethod" class="form-select"> -->
+                  <select id="expPaymentMethod">
+                      <option value="">Choose Payment Method</option>
+                  </select>
+                  <div class="error-message">Payment Method is required</div>
+              </div>
+          </div>
+
+          <div class="form-group">
+              <label class="form-label" for="expNotes">Notes</label>
+              <textarea id="expNotes" class="form-textarea" placeholder="Additional notes (optional)"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="setReminderCheck" onchange="toggleReminderFields(this.checked)" />
+              <span>Set a Reminder for this Expense</span>
+            </label>
+          </div>
+
+          <div id="reminderFields" style="display:none;" class="form-row card-panel grey lighten-4">
+            <div class="form-group">
+                <label class="form-label" for="reminderDate">Reminder Date</label>
+                <input id="reminderDate" type="date" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="reminderTime">Reminder Time</label>
+                <input id="reminderTime" type="time" class="form-input">
+            </div>
+          </div>
+
+          <div class="form-group">
+              <label class="form-label">Receipt/File</label>
+              <div class="file-display">
+                  <i class="material-icons">attachment</i>
+                  <span id="expReceiptUrl">No file attached</span>
+              </div>
+          </div>
+
+          <!-- Hidden fields -->
+          <input type="hidden" id="aiCat">
+          <input type="hidden" id="aiSubCat">
+          <input type="hidden" id="aiAmount">
+          <input type="hidden" id="aiVendor">
+          <input type="hidden" id="aiDate">
+          <input type="hidden" id="ocrText">
+          <input type="hidden" id="receiptFileName">
+
+          <div class="action-buttons">
+              <button class="btn-submit" onclick="submitExpense()">
+                  <i class="material-icons" style="vertical-align: middle; margin-right: 5px;">check_circle</i>
+                  Submit Expense
+              </button>
+              <button class="btn-reset" onclick="resetForm()">
+                  <i class="material-icons" style="vertical-align: middle; margin-right: 5px;">refresh</i>
+                  Clear / Start Over
+              </button>
+          </div>
+      </div>
+
+       <div id="multiExpenseConfirmArea" class="card-panel" style="display: none;">
+        <h5><i class="material-icons">playlist_add_check</i> Review & Confirm Multiple Expenses</h5>
+        <p>AI has processed the selected emails. Please review the details below before submitting.</p>
+        
+        <div class="multi-expense-table-container">
+          <table id="multiExpenseConfirmTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Vendor</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Cost Center</th>
+                <th>Payment Method</th>
+              </tr>
+            </thead>
+            <tbody id="multiExpenseConfirmTableBody">
+              <!-- Rows will be dynamically inserted here -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="multi-expense-footer">
+          <div id="multiExpenseSummary" class="summary-stats">
+            <span>Total Records: <strong id="multiRecordCount">0</strong></span>
+            <span>Total Amount: <strong id="multiAmountSum">฿0.00</strong></span>
+          </div>
+          <div class="action-buttons">
+            <button class="btn-submit" onclick="submitAllProcessedExpenses()">
+              <i class="material-icons left">done_all</i>Submit All
+            </button>
+            <button class="btn-reset" onclick="cancelMultiExpense()">
+              <i class="material-icons left">cancel</i>Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div> 
+
+     <!-- ======================================================= -->
+    <!-- --- INTEGRATED FLOATING ACTION BUTTON (FAB) MENU --- -->
+    <!-- ======================================================= -->
+    <!-- In WebApp.html, replace the entire .fixed-action-btn div -->
+
+<div class="fixed-action-btn" id="mainFabMenu">
+  <a class="btn-floating btn-large waves-effect waves-light">
+    <i class="large material-icons">menu</i>
+  </a>
+  <ul>
+    <!-- THEME SWITCHER (Correctly Nested Structure) -->
+    <li class="theme-switcher-li">
+      <a class="btn-floating blue tooltipped" data-position="left" data-tooltip="Change Theme">
+        <i class="material-icons">palette</i>
+      </a>
+      <!-- The theme menu is now INSIDE the list item -->
+      <div id="themeOptionsMenu" class="theme-options-menu">
+        <a class="btn-floating" style="background-color: #ffffff; border: 2px solid #e0e0e0;" data-theme="light" title="Light"></a>
+        <a class="btn-floating" style="background-color: #212121;" data-theme="dark" title="Dark"></a>
+        <a class="btn-floating" style="background-color: #1e88e5;" data-theme="blue" title="Blue"></a>
+        <a class="btn-floating" style="background-color: #43a047;" data-theme="green" title="Green"></a>
+        <a class="btn-floating" style="background-color: #fb8c00;" data-theme="orange" title="Orange"></a>
+      </div>
+    </li>
+    <!-- Dark Mode Toggle -->
+    <li>
+      <a class="btn-floating yellow darken-3 tooltipped" data-position="left" data-tooltip="Toggle Dark Mode" id="darkModeToggle">
+        <i class="material-icons">brightness_4</i>
+      </a>
+    </li>
+    <!-- Print Report -->
+    <li>
+      <a class="btn-floating red tooltipped" onclick="generateExpenseReport()" data-position="left" data-tooltip="Print Report">
+        <i class="material-icons">print</i>
+      </a>
+    </li>
+    <!-- View Expenses Report -->
+    <li>
+      <a class="btn-floating green tooltipped" onclick="openExpenseViewModal()" data-position="left" data-tooltip="View Expenses">
+        <i class="material-icons">assessment</i>
+      </a>
+    </li>
+    <!-- User Profile -->
+    <li>
+      <a class="btn-floating purple tooltipped" onclick="openUserProfileModal()" data-position="left" data-tooltip="User Profile & Settings">
+        <i class="material-icons">account_circle</i>
+      </a>
+    </li>
+  </ul>
+</div>
+
+
+  <div id="expenseViewModal" class="modal responsive-modal">
+    <div class="modal-content">
+    <h4>Expense Overview</h4>
+    
+    <div id="expenseSummarySection" class="row equal-height-cards">
+      <div class="col s12 m6 card-panel" style="padding: 15px; margin-bottom:10px; background-color: #e3f2fd; border-radius:5px;">
+        <h5>This Month (<span id="currentMonthForSummary"></span>)</h5>
+        <p>Entries: <strong id="summaryThisMonthEntries">0</strong></p>
+        <p>Total (฿): <strong id="summaryThisMonthAmount">0.00</strong></p>
+      </div>
+      <div class="col s12 m6 card-panel" style="padding: 15px; margin-bottom:10px; background-color: #e8f5e9; border-radius:5px;">
+        <h5>Overall Summary (<span id="selectedPeriodForSummary"></span>)</h5>
+        <p>Total Entries: <strong id="summaryOverallEntries">0</strong></p>
+        <p>Grand Total (฿): <strong id="summaryOverallAmount">0.00</strong></p>
+      </div>
+    </div>
+
+    <div id="expenseSelectionSummarySection" class="row card-panel" style="display:none; padding: 15px; margin-top:15px; margin-bottom:15px; background-color: #fffde7; border: 1px solid #fff59d; border-radius:5px;">
+      <h5 style="font-size: 1.2rem; color: #f57f17; margin-top:0; margin-bottom:15px;">Filtered Selection Summary</h5>
+      <div class="col s12 m4 l_one-fifth"> <p>Visible Entries: <strong id="selectionTotalEntries">0</strong></p>
+      </div>
+      <div class="col s12 m4 l_one-fifth">
+        <p>Selection Total (฿): <strong id="selectionTotalAmount">0.00</strong></p>
+      </div>
+      <div class="col s12 m4 l_one-fifth">
+        <p>Distinct Vendors: <strong id="selectionDistinctVendors">0</strong></p>
+      </div>
+      <div class="col s12 m6 l_one-fifth">
+        <p>Distinct Cost Centers: <strong id="selectionDistinctCostCenters">0</strong></p>
+      </div>
+      <div class="col s12 m6 l_one-fifth">
+        <p>Distinct Payment Methods: <strong id="selectionDistinctPaymentMethods">0</strong></p>
+      </div>
+    </div>
+
+    <div class="input-field col s12">
+      <i class="material-icons prefix">search</i>
+      <input type="text" id="expenseSearchInput" onkeyup="filterExpenseTable()" placeholder="Search by vendor, description, category, amount...">
+      <label for="expenseSearchInput">Search Expenses</label>
+    </div>
+    
+    <div id="expenseTableContainer" class="scrollable-table-container">
+      <table id="expenseDataTable" class="striped highlight scrollable-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Cost Center</th>
+            <th>Category</th>
+            <th>Subcategory</th>
+            <th>Vendor</th>
+            <th>Description</th>
+            <th>Amount (฿)</th>
+            <th>Payment Method</th>
+            <th>Receipt</th>
+          </tr>
+        </thead>
+        <tbody id="expenseTableBody">
+          </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <a class="modal-close waves-effect waves-green btn-flat">Close</a>
+  </div>
+</div>
+
+  <div id="celebrationPopup" class="celebration-popup card-panel" style="display:none;">
+    <div id="celebrationMessageContent">
+      </div>
+    <div class="progress" id="celebrationTimerBar" style="display:none; margin-top: 15px;">
+        <div class="determinate" style="width: 100%"></div>
+    </div>
+  </div>
+  <div id="reportContainer" style="display:none; padding: 30px;">
+    <h4>Expense Report</h4>
+    <button class="btn green" onclick="exportReportToPDF()">PDF V.1</button>
+    <button class="btn green" onclick="exportReportToPDF_V2()">PDF V.2</button>
+    <div id="reportSections" class="no-print"></div>
+  </div>
+  
+  <div id="dateSelectionModal" class="modal responsive-modal">
+    <div class="modal-content">
+      <h4>Select Data Range or Period</h4>
+      <div class="row">
+        <div class="input-field col s12 m6">
+          <select id="periodSelect">
+            <option value="" disabled selected>Choose a period</option>
+            <option value="custom">Custom Date Range</option>
+            <option value="thisMonth">This Month</option>
+            <option value="previousMonth">Previous Month</option>
+            <option value="past3Months">Past 3 Months</option>
+            <option value="past6Months">Past 6 Months</option>
+            <option value="thisYear">This Year (YTD)</option>
+            <option value="lastYear">Last Year</option>
+            <option value="ALL">All Time</option>
+            </select>
+          <label>Predefined Period</label>
+        </div>
+      </div>
+      <div class="row" id="customDateRange" style="display:none;">
+        <div class="input-field col s12 m6">
+          <input type="text" class="datepicker" id="startDateSelect">
+          <label for="startDateSelect">Start Date</label>
+        </div>
+        <div class="input-field col s12 m6">
+          <input type="text" class="datepicker" id="endDateSelect">
+          <label for="endDateSelect">End Date</label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <a class="modal-close waves-effect waves-grey btn-flat">Cancel</a>
+      <button class="btn waves-effect waves-light green" id="applyDateFilterBtn">Apply</button>
+    </div>
+  </div>
+
+  <div id="emailResultsModal" class="modal responsive-modal">
+    <div class="modal-content">
+      <div id="emailModalHeader">
+        <h4>Email Search Results</h4>
+        <p class="grey-text" id="emailSearchSummary">Searching...</p>
+      </div>
+      <div class="input-field col s12" id="emailModalFilterBar">
+        <i class="material-icons prefix">search</i>
+        <input type="text" id="emailSearchFilter" onkeyup="filterEmailTable()" placeholder="Filter results by sender, subject...">
+        <label for="emailSearchFilter">Filter Results</label>
+      </div>
+      <div id="emailModalBody">
+        <div id="emailLoader" class="progress" style="display: none;"><div class="indeterminate"></div></div>
+        <table id="emailResultsTable" class="highlight responsive-table">
+          <thead>
+            <tr>
+              <th><label><input type="checkbox" id="selectAllEmails" /><span></span></label></th>
+              <th>Status</th> <!-- NEW 'Status' Column -->
+              <th>Date</th>
+              <th>Sender</th>
+              <th>Subject</th>
+              <th>Snippet</th>
+              <th>Attachments</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="emailResultsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="processSelectedEmailsBtn" class="btn waves-effect waves-light green" onclick="handleMultipleEmailSelection()">Process Selected</button>
+      <a class="modal-close waves-effect waves-grey btn-flat">Close</a>
+    </div>
+  </div>
+
+  <!-- User Profile Modal -->
+  <div id="userProfileModal" class="modal responsive-modal">
+    <div class="modal-content">
+      <h4>User Profile & App Settings</h4>
+      <div id="userProfileLoader" class="progress" style="display: none;"><div class="indeterminate"></div></div>
+      
+      <div id="userProfileContent" style="display:none;">
+        <!-- User Info Section -->
+        <div class="row card-panel">
+          <div class="col s12 m6">
+            <p><strong>Name:</strong> <span id="userName"></span></p>
+            <p><strong>Email:</strong> <span id="userEmail"></span></p>
+            <button class="btn waves-effect waves-light" onclick="shareApp()">
+                <i class="material-icons left">share</i> Share App Template
+            </button>
+          </div>
+          <div class="col s12 m6">
+            <p><strong>API Key In Use:</strong> <span id="userApiKey" class="tooltipped" data-position="top" data-tooltip=""></span></p>
+            <p><strong>Purpose:</strong> <span id="userApiKeyPurpose"></span></p>
+          </div>
+        </div>
+
+        <!-- Stats Section -->
+        <div class="row equal-height-cards">
+          <div class="col s12 m6 card-panel teal lighten-5">
+            <h6>This Month's Activity</h6>
+            <p>Entries: <strong id="statsThisMonthEntries">0</strong></p>
+            <p>Amount: <strong id="statsThisMonthAmount">฿0.00</strong></p>
+          </div>
+          <div class="col s12 m6 card-panel blue lighten-5">
+            <h6>All-Time Activity</h6>
+            <p>Entries: <strong id="statsTotalEntries">0</strong></p>
+            <p>Amount: <strong id="statsTotalAmount">฿0.00</strong></p>
+            <p>First Entry: <strong id="statsFirstEntry">N/A</strong></p>
+            <p>Last Entry: <strong id="statsLastEntry">N/A</strong></p>
+          </div>
+        </div>
+
+        <!-- Masters Section -->
+        <h5>App Master Lists</h5>
+        <p class="caption">Click to view or edit the master lists used in dropdowns.</p>
+        <ul id="mastersAccordion" class="collapsible">
+          <!-- Accordions will be dynamically inserted here -->
+        </ul>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <a class="modal-close waves-effect waves-grey btn-flat">Close</a>
+    </div>
+  </div>
+
+  <div id="askAiModal" class="modal ask-ai-modal">
+    <div class="modal-content">
+      <h4>What would you like to do?</h4>
+      <div class="ask-ai-options">
+        <div class="ask-ai-option-card" onclick="handleAskQuestion()">
+          <i class="material-icons">question_answer</i>
+          <h5>Ask a Question</h5>
+          <p>Query your expense data. "How much did I spend on food last week?"</p>
+        </div>
+        <div class="ask-ai-option-card" onclick="handleGetFinancialAdvice()">
+          <i class="material-icons">lightbulb</i>
+          <h5>Get Financial Advice</h5>
+          <p>Receive creative, personalized saving tips from your AI financial friend.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <!-- Tom Select JS -->
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.9.3/html2pdf.bundle.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script> 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script> 
+
+    
+    <script>  
+      const SPREADSHEET_ID = "<?= serverSpreadsheetId ?>";
+      const CURRENCY_SYMBOL = "<?= currencySymbol ?>";
+      const CURRENCY_CODE = "<?= currencyCode ?>";
+    </script>
+    
+    <?!= include('JavaScript'); ?>
+  </body>
+</html>
