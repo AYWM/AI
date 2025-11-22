@@ -1744,6 +1744,12 @@ function runOrchestratorTask(question, cacheKey, taskId) {
     updateTaskStatus(taskId, { stage: 'start', message: '🚀 Agent activated...'});
     const executionResult  = agentOrchestrator(question, taskId);
     
+    saveUserSessionContext(
+        userEmail, 
+        question, 
+        executionResult.result.summary // The text summary of the answer
+    );
+    
     if (executionResult.status === 'ERROR') {
         // This handles errors that happened inside the agent loop
         throw executionResult.error;
@@ -1966,33 +1972,46 @@ function getDeliberationPrompt(originalQuestion, history, context, taskId, turnN
     // It provides better context for the AI's next step, which improves accuracy.
     const historyString = history.length > 0 ?
         history.map(h => {
-            if (h.role === 'tool') return `--> Observation (Result of last action): ${h.content}`;
-            if (h.role === 'assistant' && h.tool_calls) return `--> Thought: The goal is not yet complete. I will call the '${h.tool_calls[0].function.name}' tool.`;
-            return '';
+            if (h.role === 'tool') return `🔍 OBSERVATION (Tool Result): ${h.content}`;
+            if (h.role === 'assistant' && h.tool_calls) return `⚙️ ACTION: Calling tool '${h.tool_calls[0].function.name}'`;
+            if (h.role === 'assistant' && h.content) return `🧠 THOUGHT: ${h.content}`;
+            return ''; // Skip user messages in this specific summary view to save tokens
         }).filter(Boolean).join('\n') :
         "No actions have been taken yet.";
 
     // Your smart turn-counter logic is integrated into the main rules.
-    const turnWarning = (turnNumber >= maxTurns) 
-        ? `\n- ⚠️ **FINAL TURN (${turnNumber}/${maxTurns}): You are FORBIDDEN from calling another tool. You MUST provide a final answer now based on the available information, even if it's incomplete.**`
+   const turnWarning = (turnNumber >= maxTurns) 
+        ? `\n⚠️ CRITICAL WARNING: This is your FINAL TURN (${turnNumber}/${maxTurns}). You CANNOT call more tools. You MUST summarize the data you have now.`
         : '';
+
+    const sessionContext = getUserSessionContext(context.userEmail);
+    let contextString = "";
+        if (sessionContext.lastQuery) {
+            contextString = `
+        **PREVIOUS USER QUERY:** "${sessionContext.lastQuery}"
+        **PREVIOUS RESULT SUMMARY:** "${sessionContext.lastDataSummary}"
+        (Use this if the user asks follow-up questions like "filter that" or "send this")
+            `;
+        }
 
     // This prompt now combines the best of both your versions.
     return `
-    **Role:** You are a hyper-intelligent financial analyst and task orchestrator. Your objective is to accurately and completely achieve the user's goal by calling tools and then summarizing the results.
+    **SYSTEM ROLE:**
+    You are the "Fin" Agent, an expert financial orchestrator. Your goal is to answer the user's question by retrieving accurate data.
 
-    **SEMANTIC MODEL & CONTEXT (Your Knowledge Base):**
-    - **User's Original Goal:** "${originalQuestion}"
+    **SEMANTIC CONTEXT:**
     - **Current Date:** "${context.currentDate}"
     - **Logged-in User Email:** "${context.userEmail}"
-    - **User's Personal Cost Center:** "${context.userCostCenter}"
-    - **User Aliases (name -> email):** ${context.aliasMapString}
+    - **Personal Cost Center:** "${context.userCostCenter}"
+    - **Aliases (name -> email):** ${context.aliasMapString}
+    - **Goal:** "${originalQuestion}"
+    ${contextString}
 
     ---
-    **Verified Data from User's History (Use this for grounding):**
-    - **User's Actual Primary Categories:** ${historicalData.categories}
-    - **User's Actual Subcategories:** ${historicalData.subcategories} 
-    - **User's Actual Vendors:** ${historicalData.vendors}
+    **AVAILABLE DATA INDICES:**
+    - **Primary Categories:** ${historicalData.categories}
+    - **Subcategories:** ${historicalData.subcategories} 
+    - **Vendors:** ${historicalData.vendors}
     ---
 
     **CONVERSATION HISTORY (Actions Taken So Far):**
@@ -2000,11 +2019,12 @@ function getDeliberationPrompt(originalQuestion, history, context, taskId, turnN
     ${historyString}
     ---
 
-    **YOUR TASK (Follow these rules with perfect accuracy):**
-
-    **RULE 1: DECIDE YOUR ACTION.**${turnWarning}
-    - **IF the goal is fully satisfied** by the "Observation" in the history, you MUST provide a final answer. Proceed to FINAL ANSWER INSTRUCTIONS.
-    - **IF the goal requires more information**, you MUST call a tool. Proceed to TOOL CALL INSTRUCTIONS.
+    **DECISION PROTOCOL (Follow Strictly):**
+    1. **ANALYZE:** Look at the "Observation" in the history. Does it contain the answer?
+    2. **DECIDE:**
+       - IF data is missing -> Call a Tool (e.g., 'get_expense_data').
+       - IF data is sufficient -> Provide Final Answer.
+       - IF you failed previously -> Try a different search term or broader date range.
 
     **TOOL CALL INSTRUCTIONS (When the goal is INCOMPLETE):**
         1. Identify the single next tool needed to advance the goal (e.g., get_expense_data, create_pdf_report).
@@ -2059,10 +2079,11 @@ function agentOrchestrator(question, taskId) {
   let fallbackAttempts = [];
   const MAX_TURNS_ADAPTIVE = getAdaptiveMaxTurns(question);
   const startTime = new Date();
+  let currentHistory = []; // Store history here to pass to fallback
 
   try {
     updateTaskStatus(taskId, { stage: 'planning', message: 'Attempting with primary provider (GEMINI)...' });
-    executionResult = runAgentLoop(question, 'gemini', taskId, MAX_TURNS_ADAPTIVE);
+    executionResult = runAgentLoop(question, 'gemini', taskId, MAX_TURNS_ADAPTIVE, []);
     executionResult.provider = 'gemini';
       executionResult.turns = executionResult.turns || 0;
     executionResult.status = 'COMPLETE';
@@ -2074,8 +2095,8 @@ function agentOrchestrator(question, taskId) {
           turns: e.turns || 0,
           lastResult: e.lastToolResult || null
       });
-
-      Logger.log(`⚠️ Gemini orchestrator failed after ${e.turns || 0} turns: ${e.message}`);
+      const failedHistory = e.history || [];
+      Logger.log(`⚠️ Gemini orchestrator failed after ${e.turns || 0} turns: ${e.message}. Switching to fallback with ${failedHistory.length} history items.`);
       
       // Intelligent fallback selection based on error type
       const fallbackProvider = selectFallbackProvider(e, question);
@@ -2087,7 +2108,7 @@ function agentOrchestrator(question, taskId) {
         });
         
         try {
-          executionResult = runAgentLoop(question, fallbackProvider, taskId, MAX_TURNS_ADAPTIVE - (e.turns || 0));
+          executionResult = runAgentLoop(question, fallbackProvider, taskId, MAX_TURNS_ADAPTIVE - (e.turns || 0), failedHistory);
           executionResult.provider = fallbackProvider;
           executionResult.turns = (e.turns || 0) + (executionResult.turns || 0);
           executionResult.status = 'FALLBACK_SUCCESS';
@@ -2196,7 +2217,7 @@ function getAdaptiveMaxTurns(question) {
     return wordCount < 10 ? 3 : 4;
 }
 
-function runAgentLoop(question, provider, taskId) {
+function runAgentLoop(question, provider, taskId, maxTurns, initialHistory = []) {
     const apiKey = provider === 'groq' ? PropertiesService.getScriptProperties().getProperty('GROQ_API_KEY') : getGeminiApiKey();
     if (!apiKey) throw new Error(`API key for ${provider} is not configured.`);
 
@@ -2209,7 +2230,7 @@ function runAgentLoop(question, provider, taskId) {
         currentDate: new Date().toISOString().slice(0, 10)
     };
     const availableTools = getAgentTools();
-    let conversationHistory = [];
+    let conversationHistory = [...initialHistory];
     let lastToolResult = null;
     const MAX_TURNS = 5;
 
@@ -2373,6 +2394,7 @@ function runAgentLoop(question, provider, taskId) {
 
     const finalError = new Error("Agent exceeded maximum number of turns.");
     finalError.lastToolResult = lastToolResult;
+    finalError.history = conversationHistory;
     finalError.turns = MAX_TURNS; // Add turns to the error object
     finalError.provider = provider;
     throw finalError;
@@ -2419,6 +2441,23 @@ function callGroqWithTools(messages, tools, apiKey, groqModel) {
   }
   
   return JSON.parse(responseText);
+}
+
+function getUserSessionContext(userEmail) {
+  const cache = CacheService.getUserCache();
+  const sessionKey = `SESSION_${userEmail}`;
+  const cached = cache.get(sessionKey);
+  return cached ? JSON.parse(cached) : { lastQuery: null, lastDataSummary: null };
+}
+
+function saveUserSessionContext(userEmail, query, resultSummary) {
+  const cache = CacheService.getUserCache();
+  const sessionKey = `SESSION_${userEmail}`;
+  const context = {
+    lastQuery: query,
+    lastDataSummary: resultSummary ? resultSummary.substring(0, 200) : "No data found"
+  };
+  cache.put(sessionKey, JSON.stringify(context), 600); // Keep context for 10 minutes
 }
 
 // Helper for making tool-based calls
