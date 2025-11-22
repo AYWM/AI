@@ -1,0 +1,3229 @@
+  <script>
+    let helperData = {};
+    let currentFile = null; // {fileName, mimeType, base64Data}
+    let tomSelectInstances = {};
+    let allExpensesData = []; // To store fetched expenses for client-side search
+
+    // Add a global variable to store the callback after date selection
+    let _currentActionAfterDateSelection = null;
+    let _dateSelectionCriteria = null; // To store the chosen criteria
+    let currentUserStats = { isLoaded: false, N_thisMonth: 0, Amt_thisMonth: 0, N_total: 0, Amt_total: 0 };
+
+
+    // for email fetch
+    let _currentEmailSource = { threadId: null };
+
+
+    document.addEventListener('DOMContentLoaded', function() {
+      // M.AutoInit(); // Initialize Materialize components
+      M.FloatingActionButton.init(document.querySelectorAll('.fixed-action-btn'));
+      M.Tooltip.init(document.querySelectorAll('.tooltipped'));
+      
+      initializeModals();
+      initializeEventListeners();
+      initializeThemeSwitcher();
+      loadHelperData(); //loadHelperData();
+      setupVendorLogic(); //setupVendorSearch();
+      setupCombinedCategoryLogic();
+      
+    });
+
+    // --- Event Listeners Setup ---
+    function initializeEventListeners() {
+
+      // --- FIX for iOS Tooltip Bug ---
+      document.body.addEventListener('touchstart', () => {
+        const tooltips = document.querySelectorAll('.material-tooltip');
+        if (tooltips.length > 0) {
+            tooltips.forEach(tooltip => {
+                // The tooltip instance is attached to the element *before* the tooltip div
+                const instance = M.Tooltip.getInstance(tooltip.previousElementSibling);
+                if (instance) {
+                    instance.close();
+                }
+            });
+        }
+      }, { passive: true }); // Use passive listener for performance
+
+      document.body.addEventListener('touchend', () => {
+          const tooltips = document.querySelectorAll('.material-tooltip');
+          tooltips.forEach(tooltip => {
+              const instance = M.Tooltip.getInstance(tooltip.previousElementSibling);
+              if (instance) {
+                  instance.close();
+              }
+          });
+      }, { passive: true }); // Use passive listener for performance
+      
+      
+
+      // Theme selection
+      document.querySelectorAll('#themeOptionsMenu a').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const theme = btn.getAttribute('data-theme');
+          document.documentElement.setAttribute('data-theme', theme);
+          localStorage.setItem('appTheme', theme);
+          themeOptionsMenu.classList.remove('active'); // Close menu after selection
+          const fabInstance = M.FloatingActionButton.getInstance(document.getElementById('mainFabMenu'));
+          if (fabInstance && fabInstance.isOpen) {
+              fabInstance.close();
+          }
+        });
+      });
+
+      const savedTheme = localStorage.getItem('appTheme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      
+      document.getElementById('darkModeToggle').addEventListener('click', () => {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = (currentTheme === 'dark') ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('appTheme', newTheme);
+      });
+      
+
+      document.getElementById('userInput').addEventListener('paste', async (e) => {
+        const items = e.clipboardData.items;
+        for (let item of items) {
+          if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
+              handleFileUpload(file);
+              break;
+            }
+          }
+        }
+      });
+          
+      document.getElementById('fillFormBtn').addEventListener('click',setManualFormDefaults);
+
+      // Enhanced keyboard support for modals
+      document.addEventListener('keydown', function(e) {
+        // Close modal on Escape key
+        if (e.key === 'Escape') {
+          const openModals = document.querySelectorAll('.modal.open');
+          openModals.forEach(modal => {
+            const instance = M.Modal.getInstance(modal);
+            if (instance) {
+              instance.close();
+            }
+          });
+        }
+      });
+
+      // Ensure modals are responsive on window resize
+      window.addEventListener('resize', function() {
+        // Reinitialize modals if needed
+        const openModals = document.querySelectorAll('.modal.open');
+        openModals.forEach(modal => {
+          const instance = M.Modal.getInstance(modal);
+          if (instance) {
+            // Materialize handles responsive behavior automatically
+            // but we can trigger a resize event if needed
+            instance._updateModalSize?.();
+          }
+        });
+      });
+
+      // Attach listener for the multi-email process button
+      const processSelectedEmailsBtn = document.getElementById('processSelectedEmailsBtn');
+      if (processSelectedEmailsBtn) {
+        processSelectedEmailsBtn.addEventListener('click', handleMultipleEmailSelection);
+      }
+
+      // Listener for the new Ask AI modal button
+      document.getElementById('openAskAiModalBtn').addEventListener('click', () => {
+          const modalInstance = M.Modal.getInstance(document.getElementById('askAiModal'));
+          modalInstance.open();
+      });
+      
+    }    
+
+  // --- Expense View Modal Logic ---
+  
+  function initializeModals() {
+    const modals = document.querySelectorAll('.modal');
+    const modalInstances = M.Modal.init(modals, {
+        dismissible: true,
+        opacity: 0.6,
+        inDuration: 300,
+        outDuration: 200,
+        startingTop: '10%',
+        endingTop: '10%',
+        onOpenEnd: function(modalElement) {
+          if (modalElement.id === 'dateSelectionModal') {
+            initializeDateModalTomSelect();
+          }
+        }
+    });
+
+    // Initialize date pickers inside the date modal
+    const datepickerElems = document.querySelectorAll('#dateSelectionModal .datepicker');
+    M.Datepicker.init(datepickerElems, {
+        format: 'yyyy-mm-dd',
+        autoClose: true,
+        container: document.body
+    });
+
+    // Dynamically update period labels
+    updatePeriodSelectOptions();
+
+    // Attach listener for the date filter apply button
+    document.getElementById('applyDateFilterBtn').addEventListener('click', handleDateFilterApply);
+
+    //Ask Ai Modal
+    const askAiModal = document.getElementById('askAiModal');
+    M.Modal.init(askAiModal, { dismissible: true });
+
+  }
+
+  // Theme switcher enhancement for better UX
+  function initializeThemeSwitcher() {
+    const themeButtons = document.querySelectorAll('.theme-options-menu a[data-theme]');
+    
+    themeButtons.forEach(button => {
+      button.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const theme = this.getAttribute('data-theme');
+        if (theme) {
+          document.documentElement.setAttribute('data-theme', theme);
+          localStorage.setItem('selectedTheme', theme);
+          
+          // Use your existing celebration popup function if available
+          if (typeof showCelebrationPopup === 'function') {
+            showCelebrationPopup(`
+              <h5 style="margin-top: 0; color: var(--primary);">
+                <i class="material-icons" style="vertical-align: middle;">palette</i>
+                Theme Updated!
+              </h5>
+              <p style="margin-bottom: 0;">Your theme has been changed to <strong>${theme}</strong>.</p>
+            `, 2000);
+          }
+        }
+        
+        // Close the FAB menu and theme submenu
+        const fabMenu = document.querySelector('.fixed-action-btn');
+        if (fabMenu) {
+          const instance = M.FloatingActionButton.getInstance(fabMenu);
+          if (instance) {
+            instance.close();
+          }
+        }
+        
+        // Close theme submenu
+        const themeParent = document.querySelector('.btn-floating[data-tooltip="Change Theme"]')?.parentElement;
+        if (themeParent) {
+          themeParent.classList.remove('active');
+        }
+      });
+    });
+  }
+
+    function setLoading(isLoading) {
+      console.log('Loading:', isLoading);
+      document.getElementById('loading').style.display = isLoading ? 'block' : 'none';
+      document.getElementById('processInputBtn').disabled = isLoading;
+    }
+
+    function showStatus(message, isError = false) {
+      const statusEl = document.getElementById('statusMessage');
+      
+      // Clear any existing timeout to prevent conflicts
+      if (statusEl.hideTimeout) {
+          clearTimeout(statusEl.hideTimeout);
+      }
+      
+      // Set content and classes
+      statusEl.innerHTML = `<span class="status-icon">${isError ? '⚠️' : '✅'}</span> ${message}`;
+      statusEl.className = `status-box ${isError ? 'error' : 'success'}`;
+      
+      // Force reflow to ensure initial state is applied
+      statusEl.offsetHeight;
+      
+      // Animate in
+      statusEl.style.opacity = '1';
+      statusEl.style.transform = 'translateY(0)';
+      
+      // Hide after 5 seconds
+      statusEl.hideTimeout = setTimeout(() => {
+          statusEl.style.opacity = '0';
+          statusEl.style.transform = 'translateY(-10px)';
+          
+          // Optional: Clear content after animation completes
+          setTimeout(() => {
+              if (statusEl.style.opacity === '0') {
+                  statusEl.innerHTML = '';
+                  statusEl.className = 'status-box';
+              }
+          }, 300); // Match CSS transition duration
+      }, 5000);
+    }
+
+    function loadHelperData() {
+      setLoading(true);
+      google.script.run
+        .withSuccessHandler(data => {
+          setLoading(false);
+          if (data.error) {
+            showStatus('Error loading helper data: ' + data.error, true);
+            console.error('Error loading helper data:', data.error);
+            return;
+          }
+          helperData = data;
+          // Delay dropdown population slightly to ensure DOM is ready
+          setTimeout(() => {
+            populateDropdowns();
+            initializeTomSelects();
+          }, 0);
+        })
+        .withFailureHandler(error => {
+          setLoading(false);
+          showStatus('Failed to load initial data: ' + error.message, true);
+          console.error('Failed to load initial data:', error);
+        })
+        .getHelperListsData();
+    }
+
+  function populateDropdowns() {
+      populateSimpleDropdown('expCostCenter', helperData.costCenters);
+      populateSimpleDropdown('expPaymentMethod', helperData.paymentMethods);
+      // populateDropdown('expPrimaryCategory', helperData.primaryCategories, true, 'Select Primary Category'); // Add listener
+      populateVendorDropdown();
+      populateCombinedCategoryDropdown();
+    }
+
+    function populateSimpleDropdown(elementId, options) {
+      const select = document.getElementById(elementId);
+      select.innerHTML = `<option value="">Choose ${elementId.replace('exp', '').replace(/([A-Z])/g, ' $1').trim()}</option>`;
+      if (options) {
+        options.forEach(option => {
+          const opt = document.createElement('option');
+          opt.value = option;
+          opt.textContent = option;
+          select.appendChild(opt);
+        });
+      }
+      // M.FormSelect.init(select); // ✅ forces UI to sync with value
+    }
+
+    
+  function populateCombinedCategoryDropdown() {
+    const select = document.getElementById('expCombinedCategory');
+    if (!select) return;
+
+    // Preserve the current value if it exists, so it can be re-selected after rebuilding.
+    const currentValue = select.value;
+    
+    // Clear existing options and optgroups
+    select.innerHTML = '<option value="">Choose Expense Category</option>';
+    
+    if (helperData.subcategoriesMap) {
+      // Sort primary categories alphabetically for better organization
+      const sortedPrimaryCategories = Object.keys(helperData.subcategoriesMap).sort();
+
+      sortedPrimaryCategories.forEach(primaryCat => {
+        // Create an <optgroup> for each primary category
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = primaryCat;
+
+        // Sort subcategories within the group alphabetically
+        const sortedSubCats = helperData.subcategoriesMap[primaryCat].sort();
+
+        sortedSubCats.forEach(subCat => {
+            const option = document.createElement('option');
+            // The value remains the same: "Subcategory|PrimaryCategory"
+            option.value = `${subCat}|${primaryCat}`;
+            // The displayed text is just the subcategory name
+            option.textContent = subCat;
+            optgroup.appendChild(option);
+        });
+        select.appendChild(optgroup);
+      });
+    }
+
+    // If there was a previous value, try to set it again.
+    if (currentValue) {
+      select.value = currentValue;
+    }
+    
+  }
+      
+    function populateVendorDropdown() {
+        const select = document.getElementById('expVendor');
+        select.innerHTML = '<option value="">Choose or Type Vendor</option>';
+        if (helperData.vendors) {
+            helperData.vendors.forEach(vendor => {
+                const option = document.createElement('option');
+                option.value = vendor;
+                option.textContent = vendor;
+                select.appendChild(option);
+            });
+        }
+        // Add option for custom vendor
+        const customOption = document.createElement('option');
+        customOption.value = '__CUSTOM__';
+        customOption.textContent = 'Type New Vendor...';
+        select.appendChild(customOption);
+        // M.FormSelect.init(select); // ✅ forces UI to sync with value
+    }
+
+    function setupVendorLogic() {
+      const vendorSelect = document.getElementById('expVendor');
+      const customInput = document.getElementById('expVendorCustom');
+      
+      vendorSelect.addEventListener('change', function() {
+          if (this.value === '__CUSTOM__') {
+              customInput.style.display = 'block';
+              customInput.focus();
+          } else {
+              customInput.style.display = 'none';
+              customInput.value = '';
+          }
+      });
+    }
+
+    function setupCombinedCategoryLogic() {
+        const combinedSelect = document.getElementById('expCombinedCategory');
+        const primaryHidden = document.getElementById('expPrimaryCategory');
+        const subHidden = document.getElementById('expSubcategory');
+        
+        combinedSelect.addEventListener('change', function() {
+            if (this.value) {
+                const [subCat, primaryCat] = this.value.split('|');
+                primaryHidden.value = primaryCat;
+                subHidden.value = subCat;
+            } else {
+                primaryHidden.value = '';
+                subHidden.value = '';
+            }
+        });
+    }
+
+    function handleFileUpload(file) {
+      if (!file) return;
+      currentFile = { fileName: file.name, mimeType: file.type, base64Data: null };
+      
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        currentFile.base64Data = e.target.result.split(',')[1];
+        showStatus(`File "${file.name}" ready. Processing automatically...`, false);
+        document.getElementById('expReceiptUrl').textContent = `Processing: ${file.name}`;
+        document.getElementById('receiptFileName').value = file.name;
+        processInput(); // <-- AUTOMATICALLY TRIGGER PROCESSING
+      };
+      reader.onerror = function(e) {
+        showStatus('Error reading file: ' + e.target.error.name, true);
+        currentFile = null;
+      };
+      reader.readAsDataURL(file);
+    }
+
+  /**
+ * A powerful function that renders the AI's response in the UI.
+ * It can display plain text, render charts using Chart.js,
+ * or dynamically build and display responsive tables.
+ */
+  function showAIAnswer(response) {
+    const aiAnswerArea = document.getElementById('aiAnswerArea');
+    const aiAnswerContent = document.getElementById('aiAnswerContent');
+    aiAnswerContent.innerHTML = ''; // Clear previous content
+
+    if (response.summary) {
+        const summaryP = document.createElement('p');
+        // A simple markdown parser for bold and newlines
+        summaryP.innerHTML = escapeHtml(response.summary).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+        aiAnswerContent.appendChild(summaryP);
+    }
+
+    const renderChart = (chartData) => {
+        if (!chartData || !chartData.data) return;
+        const canvasContainer = document.createElement('div');
+        canvasContainer.style.maxHeight = '400px';
+        canvasContainer.style.position = 'relative';
+        canvasContainer.style.marginBottom = '2rem';
+        const canvas = document.createElement('canvas');
+        canvas.id = 'aiChart';
+        canvasContainer.appendChild(canvas);
+        aiAnswerContent.appendChild(canvasContainer);
+        new Chart(canvas, {
+            type: chartData.type || 'pie',
+            data: chartData.data,
+            options: chartData.options || { responsive: true, maintainAspectRatio: false }
+        });
+    };
+
+    const renderTable = (tableData) => {
+        if (!tableData || !tableData.data || !tableData.columns) return;
+        
+        const data = tableData.data;
+        const columns = tableData.columns;
+        const recordCount = data.length;
+        const totalSum = data.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+
+        const controlsContainer = document.createElement('div');
+        controlsContainer.className = 'ai-table-controls';
+        controlsContainer.innerHTML = `
+            <div class="table-stats">
+                <span>Records: <strong>${recordCount}</strong></span>
+                <span>Total Sum: <strong>${CURRENCY_SYMBOL}${formatAmount(totalSum)}</strong></span>
+            </div>
+            <input type="text" class="ai-table-search" placeholder="Filter results...">
+        `;
+        aiAnswerContent.appendChild(controlsContainer);
+
+        const tableContainer = document.createElement('div');
+        tableContainer.className = 'scrollable-table-container';
+        const table = document.createElement('table');
+        table.className = 'striped highlight responsive-table scrollable-table';
+        
+        const thead = table.createTHead();
+        const headerRow = thead.insertRow();
+        columns.forEach(colName => {
+            const th = document.createElement('th');
+            th.textContent = colName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+            const lowerColName = colName.toLowerCase();
+            if (lowerColName.includes('amount')) {
+                th.classList.add('align-right', 'col-compact');
+            } else if (lowerColName === 'description') {
+                th.classList.add('col-description');
+            } else if (lowerColName !== 'vendor') { // Let vendor be flexible
+                th.classList.add('col-compact');
+            }
+            headerRow.appendChild(th);
+        });
+
+        const tbody = table.createTBody();
+        data.forEach(rowData => {
+          const row = tbody.insertRow();
+          columns.forEach((colName, index) => {
+              const cell = row.insertCell();
+              // Add the data-label attribute
+              const headerText = headerRow.cells[index].textContent;
+              cell.setAttribute('data-label', headerText);
+
+              const lowerColName = colName.toLowerCase();
+              if (lowerColName.includes('amount')) {
+                  cell.classList.add('align-right', 'col-compact');
+              } else if (lowerColName === 'description') {
+                  cell.classList.add('col-description');
+              } else if (lowerColName !== 'vendor') {
+                  cell.classList.add('col-compact');
+              }
+
+              let cellValue = rowData[colName] === null || rowData[colName] === undefined ? '' : rowData[colName];
+              let contentHtml = '';
+              if (lowerColName.includes('amount')) {
+                contentHtml = `${CURRENCY_SYMBOL}${formatAmount(cellValue)}`;
+              } else if (colName === 'receiptUrl' && cellValue) {
+                contentHtml = `<a href="${cellValue}" target="_blank" class="tooltipped" data-tooltip="View Receipt"><i class="material-icons tiny">link</i></a>`;
+              } else {
+                contentHtml = escapeHtml(cellValue.toString());
+              }
+              cell.innerHTML = `<div class="td-content">${contentHtml}</div>`;
+          });
+        });
+        tableContainer.appendChild(table);
+        aiAnswerContent.appendChild(tableContainer);
+
+        controlsContainer.querySelector('.ai-table-search').addEventListener('keyup', function() {
+            const filter = this.value.toUpperCase();
+            tbody.querySelectorAll("tr").forEach(row => {
+                row.style.display = (row.textContent || row.innerText).toUpperCase().indexOf(filter) > -1 ? "" : "none";
+            });
+        });
+    };
+
+    // Main rendering logic based on the new structured response
+    if (response.type === 'chart_and_table') {
+        renderChart(response.data.chartData);
+        renderTable(response.data.tableData);
+    } else if (response.type === 'chart') {
+        renderChart(response.data);
+    } else if (response.type === 'table') {
+        renderTable(response.data);
+    } else if (response.type === 'text' && response.content) {
+        const contentP = document.createElement('p');
+        contentP.innerHTML = escapeHtml(response.content).replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        aiAnswerContent.appendChild(contentP);
+    } else if (!response.summary) {
+        aiAnswerContent.innerHTML = '<p>Sorry, I received an unexpected response. Please try again.</p>';
+    }
+
+    if (response.data && response.data.triggerClientReport && response.data.tableData && response.data.tableData.data) {
+      console.log("Client-side report trigger detected. Generating report.");
+      showStatus("PDF/Report trigger detected, generating report locally...", false);
+      
+      // We already have the data, so we pass it directly to the report generator
+      const dataForReport = response.data.tableData.data;
+      
+      // Assuming generateExpenseReport is your function that builds the HTML report sections
+      // We need to modify it slightly to accept data directly.
+      generateExpenseReport(dataForReport); 
+    }
+
+    aiAnswerArea.style.display = 'block';
+    aiAnswerArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    M.Tooltip.init(document.querySelectorAll('#aiAnswerArea .tooltipped'));
+    // document.getElementById('userInput').value = '';
+    currentFile = null;
+    M.updateTextFields();
+  }
+
+// Helper function to escape characters for use in a RegExp
+function escapeRegex(string) {
+    return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+    function copyAIAnswer() {
+      const content = document.getElementById('aiAnswerContent').textContent;
+      navigator.clipboard.writeText(content).then(() => {
+          showStatus('AI answer copied to clipboard!', false);
+      }).catch(() => {
+          // Fallback for older browsers
+          const textArea = document.createElement('textarea');
+          textArea.value = content;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+          showStatus('AI answer copied to clipboard!', false);
+      });
+    }
+
+    function clear_and_hide(){  
+      // Clear AI answer area before processing
+      const aiAnswerArea = document.getElementById('aiAnswerArea');
+      const aiAnswerContent = document.getElementById('aiAnswerContent');
+      if(aiAnswerArea)
+        aiAnswerArea.style.display = 'none';
+      if(aiAnswerContent)
+        aiAnswerContent.textContent = '';
+      
+      // Hide previous summary
+      const expenseSummaryArea = document.getElementById('expenseSummaryArea');
+      if(expenseSummaryArea)
+        expenseSummaryArea.style.display = 'none';
+      const expVendorCustom = document.getElementById('expVendorCustom');
+      if(expVendorCustom)
+        expVendorCustom.style.display = 'none'; // Hide custom vendor input
+      
+      // Hide Report Container if opened
+      const reportSections = document.getElementById('reportSections');
+      if(reportSections)
+        reportSections.innerHTML = '';
+      const reportContainer = document.getElementById('reportContainer');
+      if(reportContainer)
+        reportContainer.style.display = 'none'; 
+
+      const formElementsToReset = ['expDate', 'expDescription', 'expAmount', 'expVendorCustom', 'expNotes', 'expReceiptUrl', 'receiptFileName', 'ocrText', 'aiCat', 'aiSubCat', 'aiAmount', 'aiVendor', 'aiDate','setReminderCheck','reminderDate','reminderTime'];
+      formElementsToReset.forEach(id => {
+          const el = document.getElementById(id);
+          if(el){
+            el.value = '';
+            el.classList.remove('error');
+          }
+          if(id=='setReminderCheck') el.checked = false;
+      });
+      
+      clearAllErrors(); // Clear validation errors
+
+      // Clear TomSelect instances
+      ['expVendor', 'expCostCenter', 'expCombinedCategory', 'expPaymentMethod'].forEach(id => {
+        if (tomSelectInstances[id]) {
+          tomSelectInstances[id].clear();
+          // Optionally, if you dynamically added options not from helperData, clear them:
+          // tomSelectInstances[id].clearOptions(value => !helperDataOriginalOptions[id].includes(value));
+        }
+      });
+      
+    }
+
+    function processInput() {
+
+      setLoading(true);
+      clear_and_hide();
+      
+      const userInput = document.getElementById('userInput').value;
+      if (!userInput && !currentFile) {
+        showStatus('Please type something or upload a file.', true);
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(response => {
+          setLoading(false);
+          if (response.error) {
+            showStatus('AI Processing Error: ' + response.error, true);
+            console.error("AI Error:", response.error);
+          } else {
+            showStatus('AI processing complete. Please review and confirm.', false);
+            console.log("AI Response:", response);
+            populateSummaryForm(response);
+            document.getElementById('expenseSummaryArea').style.display = 'block';
+          }
+        })
+        .withFailureHandler(error => {
+          setLoading(false);
+          showStatus('Server communication error: ' + error.message, true);
+          console.error("Server Error:", error);
+        })
+        .extractExpenseDetails(userInput, currentFile);
+    }
+
+
+  // This function is called from the "Ask a Question" card in the modal
+  function handleAskQuestion() {
+      const modalInstance = M.Modal.getInstance(document.getElementById('askAiModal'));
+      modalInstance.close();
+      processQuestion(); // This is your existing function that reads the textarea and calls the agent
+  }
+
+  // This function is called from the "Get Financial Advice" card in the modal
+  function handleGetFinancialAdvice() {
+      const modalInstance = M.Modal.getInstance(document.getElementById('askAiModal'));
+      modalInstance.close();
+      getFinancialAdviceUI(); // Your existing function for this
+  }
+  
+   /**
+   * =================================================================================
+   * --- AGENTIC WORKFLOW & POLLING LOGIC (UPDATED SECTION) ---
+   * =================================================================================
+   */
+
+  /**
+   * The main entry point when a user asks a question.
+   * It calls the server, which will either return a cached result instantly
+   * or start a new background task and return a task ID for polling.
+   */
+  function processQuestion() {
+    setLoading(true);
+    clear_and_hide();
+
+    const userInput = document.getElementById('userInput').value;
+    if (!userInput) {
+        showStatus('Please type a question in the text area first.', true);
+        setLoading(false);
+        return;
+    }
+
+    // Show the AI answer area immediately to display status updates
+    const aiAnswerArea = document.getElementById('aiAnswerArea');
+    const aiAnswerContent = document.getElementById('aiAnswerContent');
+    aiAnswerContent.innerHTML = '<p id="agentStatus" class="agent-status-message">Contacting agent...</p>';
+    aiAnswerArea.style.display = 'block';
+
+    google.script.run
+        .withSuccessHandler(response => {
+            if (response.status === 'complete') {
+                // CACHE HIT: Render the answer immediately
+                setLoading(false);
+                document.getElementById('agentStatus').style.display = 'none';
+                showAIAnswer(response.result);
+                M.toast({html: 'Answer loaded from cache!', classes: 'blue rounded'});
+            } else if (response.status === 'running') {
+                // CACHE MISS: Start polling for updates
+                pollAgentTask(response.taskId);
+            } else {
+                setLoading(false);
+                showStatus('Agent Error: ' + (response.error || 'Unknown error occurred.'), true);
+            }
+        })
+        .withFailureHandler(error => {
+            setLoading(false);
+            showStatus('Server communication error: ' + error.message, true);
+        })
+        .answerQuestionAgentic(userInput);
+  }
+
+
+  /**
+   * Polls the server for status updates on a running agent task.
+   * @param {string} taskId The unique ID of the task to poll.
+   * @param {number} interval The time in milliseconds between polls.
+   */
+  function pollAgentTask(taskId) {
+    // Use a recursive setTimeout for more robust polling
+    (function poll() {
+        setTimeout(() => {
+            google.script.run
+                .withSuccessHandler(response => {
+                    const statusElement = document.getElementById('agentStatus');
+                    if (!statusElement) return; // Stop if user has navigated away
+
+                    if (response.status === 'running') {
+                        // Update UI with the latest message
+                        if (typeof response.message === 'object' && response.message.stage) {
+                            let detailsHtml = response.message.details ? `<pre class="agent-details-box">${escapeHtml(JSON.stringify(response.message.details, null, 2))}</pre>` : '';
+                            statusElement.innerHTML = `<em>${escapeHtml(response.message.message)}</em>${detailsHtml}`;
+                        } else {
+                            statusElement.innerHTML = `<em>${escapeHtml(response.message)}</em>`;
+                        }
+                        // Schedule the next poll
+                        poll();
+                    } else {
+                        // Task is complete or has failed, stop polling.
+                        setLoading(false);
+                        statusElement.style.display = 'none';
+
+                        if (response.status === 'complete') {
+                            showAIAnswer(response.result);
+                        } else { // status === 'error'
+                            showStatus('Agent Error: ' + (response.result.error || 'An unknown error occurred.'), true);
+                        }
+                    }
+                })
+                .withFailureHandler(error => {
+                    // Stop polling on server communication error
+                    setLoading(false);
+                    showStatus('Polling communication error: ' + error.message, true);
+                })
+                .getAgentTaskUpdate(taskId);
+        }, 1500); // Poll every 1.5 seconds
+    })();
+  }
+
+  
+  function populateSummaryForm(aiData) {
+    
+    console.log('Populating form with AI data:', aiData);
+    
+    // Clear all error states first
+    clearAllErrors();
+    
+    // Populate basic fields
+    document.getElementById('expDate').value = aiData.date || '';
+    document.getElementById('expDescription').value = aiData.description || '';
+    M.textareaAutoResize(document.getElementById('expDescription')); // Resize after setting value
+    document.getElementById('expAmount').value = aiData.amount || '';
+
+    console.log('About to populate aiData.costCenter: ' + aiData.costCenter);
+
+    setTomSelectValue('expCostCenter', aiData.costCenter || 'Common');
+    setTomSelectValue('expPaymentMethod', aiData.paymentMethod || 'Cash');
+    setTomSelectValue('expVendor', aiData.vendor);
+
+    // For the combined category, it's slightly more complex
+    if (aiData.primaryCategory && aiData.subcategory) {
+        const combinedValue = `${aiData.subcategory}|${aiData.primaryCategory}`;
+        const combinedText = `${aiData.subcategory} [${aiData.primaryCategory}]`;
+        setTomSelectValue('expCombinedCategory', combinedValue, combinedText);
+    } else {
+        setTomSelectValue('expCombinedCategory', null); // Clear it if no suggestion
+    }
+
+    
+
+    // Store AI data and OCR text in hidden fields
+    document.getElementById('aiDate').value = aiData.date || '';
+    document.getElementById('aiCat').value = aiData.primaryCategory || '';
+    document.getElementById('aiSubCat').value = aiData.subcategory || '';
+    document.getElementById('aiAmount').value = aiData.amount || '';
+    document.getElementById('aiVendor').value = aiData.vendor || '';
+    document.getElementById('ocrText').value = aiData.extractedPlainText || document.getElementById('userInput').value;
+    document.getElementById('expNotes').value = ''; // Clear notes, user can add
+
+    // M.textareaAutoResize(document.getElementById('expDescription')); 
+    // Re-initialize labels to float if values are pre-filled
+    M.updateTextFields();
+
+  }
+
+
+
+  // Replace your existing setManualFormDefaults with this one
+  function setManualFormDefaults() {
+    console.log("Setting manual form defaults...");
+    clear_and_hide();
+
+    // Set the date to today and ensure Materialize labels are updated
+    document.getElementById('expDate').value = new Date().toISOString().split('T')[0];
+    M.updateTextFields();
+
+    // Show the form area
+    const expenseSummaryArea = document.getElementById('expenseSummaryArea');
+    if (expenseSummaryArea) {
+      expenseSummaryArea.style.display = 'block';
+    }
+
+    // Use a short timeout to ensure the form is visible before setting dropdown values
+    setTimeout(() => {
+      // By using our smart helper function, the code is declarative and handles fallbacks.
+      // If 'Common' doesn't exist, it will look for 'Others'.
+      setTomSelectValue('expCostCenter', 'Common');
+
+      // If 'Cash' doesn't exist, it will look for 'Others'.
+      setTomSelectValue('expPaymentMethod', 'Cash');
+
+      // Tries to set 'Others' as the default vendor.
+      setTomSelectValue('expVendor', 'Others');
+
+      // Sets the category to a standard miscellaneous/other value.
+      const miscCategoryValue = "Other|Miscellaneous";
+      const miscCategoryText = "Other [Miscellaneous]";
+      setTomSelectValue('expCombinedCategory', miscCategoryValue, miscCategoryText);
+
+      // Focus the description field for quick entry
+      document.getElementById('expDescription')?.focus();
+    }, 100);
+  }
+
+  function clearAllErrors() {
+    // Remove all dynamically created error messages
+    document.querySelectorAll('.error-message').forEach(msg => msg.remove());
+    // Remove the .error class from all inputs and TomSelect wrappers
+    document.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
+  }
+
+  function setFieldError(elementId, message) {
+    const element = document.getElementById(elementId);
+    if (!element) return null;
+
+    const formGroup = element.closest('.form-group');
+    if (!formGroup) return element;
+
+    // Remove any old error message for this field first
+    const oldError = formGroup.querySelector('.error-message');
+    if (oldError) oldError.remove();
+
+    // Create and append the new error message
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message show';
+    errorDiv.textContent = message;
+    formGroup.appendChild(errorDiv);
+
+    // Add error class to the right element (TomSelect or regular input)
+    const tsWrapper = formGroup.querySelector('.ts-control');
+    if (tsWrapper) {
+      tsWrapper.classList.add('error');
+    } else {
+      element.classList.add('error');
+    }
+    
+    return formGroup; // Return the group element to scroll to
+  }
+
+  
+
+  function validateForm() {
+    clearAllErrors();
+    let isValid = true;
+    let firstInvalidFieldElement = null;
+
+    const fieldsToValidate = [
+      { id: 'expDate', message: 'Date is required.' },
+      { id: 'expCostCenter', message: 'Cost Center is required.' },
+      { id: 'expCombinedCategory', message: 'Expense Category is required.' },
+      { id: 'expDescription', message: 'Description is required.' },
+      { id: 'expAmount', message: 'A valid amount is required.' },
+      { id: 'expPaymentMethod', message: 'Payment Method is required.' }
+    ];
+
+    fieldsToValidate.forEach(field => {
+      const element = document.getElementById(field.id);
+      let value = element ? element.value.trim() : '';
+
+      // Special check for amount
+      if (field.id === 'expAmount' && (isNaN(parseFloat(value)) || parseFloat(value) <= 0)) {
+        value = ''; // Treat invalid amount as empty
+      }
+
+      if (!value) {
+        isValid = false;
+        const fieldElement = setFieldError(field.id, field.message);
+        if (!firstInvalidFieldElement) {
+          firstInvalidFieldElement = fieldElement;
+        }
+      }
+    });
+
+    // Special validation for Vendor (one of dropdown or custom must be filled)
+    const vendorDropdown = document.getElementById('expVendor').value;
+    const vendorCustom = document.getElementById('expVendorCustom').value;
+    if (!vendorDropdown && !vendorCustom) {
+      isValid = false;
+      const fieldElement = setFieldError('expVendor', 'Vendor is required.');
+      if (!firstInvalidFieldElement) {
+        firstInvalidFieldElement = fieldElement;
+      }
+    }
+
+    if (!isValid && firstInvalidFieldElement) {
+      firstInvalidFieldElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      showStatus('Please correct the highlighted errors.', true);
+      return false;
+    }
+    
+    if(isValid){
+      showSubmissionStatus();
+    }
+    return isValid;
+  }
+
+  function showSubmissionStatus() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.getElementById('loading').style.display = 'block';
+    M.toast({ html: 'Submitting expense...', classes: 'rounded green lighten-1' });
+  }
+
+
+  function clearFieldError(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) {
+      console.warn(`Element #${elementId} not found`);
+      return;
+    }
+
+    el.classList.remove('invalid');
+
+    const parent = el.closest('.input-field') || el.closest('.form-group') || el.parentElement;
+    if (parent) {
+      const errorMsg = parent.querySelector('.custom-error-message');
+      if (errorMsg) errorMsg.remove();
+    }
+
+    // Remove box shadow
+    if (el.tagName === 'SELECT') {
+      const selectWrapper = el.closest('.select-wrapper');
+      if (selectWrapper) selectWrapper.style.boxShadow = 'none';
+    } else {
+      el.style.boxShadow = 'none';
+    }
+  }
+
+  async function submitExpense() {
+    try {
+      // Step 1: Validate required fields
+      if (!validateForm()) {
+        showStatus('Please correct the highlighted errors.', true);
+        return;
+      }
+     
+      setLoading(true);
+
+      // Step 2: Handle file upload (if any)
+      let receiptUrl = null;
+      const ocrEl = document.getElementById('ocrText');
+      const ocrTextToSave = ocrEl?.value || '';
+
+      if (currentFile?.base64Data) {
+        try {
+          const uploadResponse = await new Promise((resolve, reject) => {
+            google.script.run
+              .withSuccessHandler(resolve)
+              .withFailureHandler(reject)
+              .uploadFileToDrive(currentFile.fileName, currentFile.mimeType, currentFile.base64Data);
+          });
+
+          if (uploadResponse?.error) {
+            showStatus('File Upload Error: ' + uploadResponse.error, true);
+            setLoading(false);
+            return;
+          }
+
+          receiptUrl = uploadResponse.fileUrl;
+          const receiptUrlEl = document.getElementById('expReceiptUrl');
+          if (receiptUrlEl) receiptUrlEl.value = receiptUrl;
+
+        } catch (uploadError) {
+          showStatus('File Upload Failed: ' + (uploadError.message || uploadError), true);
+          setLoading(false);
+          return;
+        }
+      } else if (document.getElementById('receiptFileName')?.value) {
+        showStatus('Warning: A file was selected but seems not processed for upload link.', true);
+      }
+
+      // Step 3: Gather form values safely
+      const safeGet = id => document.getElementById(id)?.value || '';
+
+      let primaryCategory = null;
+      let subcategory = null;
+      const combinedCategoryValue = safeGet('expCombinedCategory');
+      if (combinedCategoryValue && combinedCategoryValue.includes('|')) {
+        [subcategory, primaryCategory] = combinedCategoryValue.split('|');
+      }
+
+      const expenseData = {
+        dateOfExpense: formatDateForDisplay(safeGet('expDate')),
+        costCenter: safeGet('expCostCenter'),
+        primaryCategory: primaryCategory,
+        subcategory: subcategory,
+        vendorMerchant: safeGet('expVendor') || safeGet('expVendorCustom'),
+        itemDescription: safeGet('expDescription'),
+        amount: safeGet('expAmount'),
+        paymentMethod: safeGet('expPaymentMethod'),
+        notes: safeGet('expNotes'),
+        receiptUrl,
+        ocrText: ocrTextToSave,
+        aiSuggestedCategory: safeGet('aiCat'),
+        aiSuggestedSubCat: safeGet('aiSubCat'),
+        aiExtractedAmount: safeGet('aiAmount'),
+        aiExtractedVendor: safeGet('aiVendor'),
+        aiExtractedDate: safeGet('aiDate'),
+      };
+
+      if (document.getElementById('setReminderCheck').checked) {
+        const reminderDate = document.getElementById('reminderDate').value;
+        const reminderTime = document.getElementById('reminderTime').value;
+        if (reminderDate && reminderTime) {
+            expenseData.reminderDateTime = `${reminderDate}T${reminderTime}:00`;
+        }
+      }
+
+      // Step 4: Save the expense using Apps Script
+      google.script.run
+        .withSuccessHandler(response => {
+          setLoading(false);
+
+          if (response?.success) {
+            let celebrationMessage = "Great job! Expense saved successfully!";
+            const stats = response.summaryStats;
+
+            if (stats && !stats.error) {
+              currentUserStats = { ...stats, isLoaded: true };
+              celebrationMessage = `<h5>Awesome, ${response.email || 'user'}!</h5>` +
+                `<p>You've added <strong>${stats.N_thisMonth}</strong> expenses totaling <strong>${CURRENCY_SYMBOL}${Number(stats.Amt_thisMonth).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong> this month.</p>` +
+                `<p>In total, you have <strong>${stats.N_total}</strong> expenses recorded, summing up to <strong>${CURRENCY_SYMBOL}${Number(stats.Amt_total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>. Keep it up!</p>`;
+            }
+
+            showCelebrationPopup(celebrationMessage);
+            
+            // Apply Gmail label if the source was an email ---
+            if (_currentEmailSource.threadId) {
+              google.script.run
+                .withSuccessHandler(labelResponse => {
+                  if(labelResponse.success) console.log("Label applied successfully.");
+                })
+                .applyProcessedLabelToThread(_currentEmailSource.threadId);
+            }
+
+            resetForm(true);
+          } else {
+            showStatus('Save Error: ' + (response?.error || "Unknown error"), true);
+          }
+        })
+        .withFailureHandler(error => {
+          setLoading(false);
+          showStatus('Failed to save expense: ' + (error?.message || error), true);
+        })
+        .saveExpenseEntry(expenseData);
+
+    } catch (err) {
+      setLoading(false);
+      showStatus('Unexpected Error: ' + (err?.message || err), true);
+      console.error("submitExpense error:", err);
+    }
+  } 
+
+  function formatAmount(amount, locale = navigator.language || 'en-TH') {
+    // Normalize input: handle null, undefined, NaN, non-numeric strings
+    const num = Number(amount);
+
+    // Fallback to zero if not a valid number
+    const safeAmount = isNaN(num) ? 0 : num;
+
+    // Format using locale with 2 decimal places
+    return safeAmount.toLocaleString(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+    function formatDateForDisplay(dateStr) {
+      if (!dateStr) return '';
+      const [year, month, day] = dateStr.split('-');
+      return `${day}/${month}/${year}`;
+    }
+
+    function resetForm(fullReset = false) {
+      // Hide areas
+      clear_and_hide();
+      showStatus('Form cleared successfully.', false);
+      // ---: Clear the email source tracker ---
+      _currentEmailSource.threadId = null;
+      if (fullReset) document.getElementById('userInput').value = '';
+      M.updateTextFields(); // Ensure labels behave correctly after clearing
+
+    }
+
+    // --- Advanced Feature Placeholders (Not Implemented in this pass) ---
+    // document.getElementById('cameraBtn').addEventListener('click', () => alert('Camera feature not implemented yet.'));
+    let videoStream = null; // To hold the stream object
+
+  function startCamera() {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }) // Prefer rear camera
+        .then(function(stream) {
+          videoStream = stream;
+          const video = document.getElementById('videoStream');
+          video.srcObject = stream;
+          video.play();
+          document.getElementById('cameraView').style.display = 'block';
+          showStatus('Camera started. Point at receipt.', false);
+          document.getElementById('cameraBtn').disabled = true; // Disable while camera is active
+        })
+        .catch(function(err) {
+          console.error("Error accessing camera: ", err);
+          showStatus('Could not access camera: ' + err.message, true);
+        });
+    } else {
+      showStatus('Camera not supported by this browser.', true);
+    }
+  }
+
+  function capturePhoto() {
+    const canvas = document.getElementById('photoCanvas');
+    const video = document.getElementById('videoStream');
+    const context = canvas.getContext('2d');
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/jpeg');
+    currentFile = {
+      fileName: `photo_${new Date().getTime()}.jpg`,
+      mimeType: 'image/jpeg',
+      base64Data: dataUrl.split(',')[1] // Get base64 part
+    };
+
+    document.getElementById('expReceiptUrl').value = `Photo captured: ${currentFile.fileName}`;
+    document.getElementById('receiptFileName').value = currentFile.fileName;
+    showStatus('Photo captured and ready for processing.', false);
+    stopCamera(); // Close camera view after capture
+    processInput(); // <-- AUTOMATICALLY TRIGGER PROCESSING
+  }
+
+  function stopCamera() {
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+    }
+    document.getElementById('cameraView').style.display = 'none';
+    document.getElementById('cameraBtn').disabled = false; // Re-enable button
+  }
+
+    // document.getElementById('audioBtn').addEventListener('click', () => alert('Audio recording feature not implemented yet.'));
+  let mediaRecorder;
+  let audioChunks = [];
+  let audioMimeType = ''; // Will be set by MediaRecorder
+
+  // document.getElementById('audioBtn').onclick = toggleAudioRecording; // If you enable the button
+
+  function toggleAudioRecording() {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+          stopAudioRecording();
+      } else {
+          startAudioRecording();
+      }
+  }
+
+  function startAudioRecording() {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          navigator.mediaDevices.getUserMedia({ audio: true })
+              .then(stream => {
+                  // Detect preferred MIME type
+                  if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                      audioMimeType = 'audio/webm;codecs=opus';
+                  } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                      audioMimeType = 'audio/ogg;codecs=opus';
+                  } else {
+                      audioMimeType = 'audio/webm'; // Fallback or let browser decide
+                  }
+                  mediaRecorder = new MediaRecorder(stream, { mimeType: audioMimeType });
+                  audioChunks = []; // Clear previous chunks
+
+                  mediaRecorder.ondataavailable = event => {
+                      audioChunks.push(event.data);
+                  };
+
+                  mediaRecorder.onstop = () => {
+                      const audioBlob = new Blob(audioChunks, { type: audioMimeType });
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                          const base64Audio = reader.result.split(',')[1];
+                          showStatus('Audio recorded. Processing...', false);
+                          setLoading(true);
+                          google.script.run
+                              .withSuccessHandler(response => {
+                                  setLoading(false);
+                                  if (response.error) {
+                                      showStatus('AI Audio Processing Error: ' + response.error, true);
+                                  } else {
+                                      showStatus('AI processing complete. Please review.', false);
+                                      populateSummaryForm(response); // Assumes response structure is same as text/image
+                                      document.getElementById('expenseSummaryArea').style.display = 'block';
+                                  }
+                              })
+                              .withFailureHandler(error => {
+                                  setLoading(false);
+                                  showStatus('Server error (audio): ' + error.message, true);
+                              })
+                              .processAudioInput(base64Audio, audioMimeType); // New server function
+                      };
+                      reader.readAsDataURL(audioBlob);
+                      // Clean up stream
+                      stream.getTracks().forEach(track => track.stop());
+                  };
+
+                  mediaRecorder.start();
+                  showStatus('Recording audio... Click mic again to stop.', false);
+                  // Update UI for audio button
+                  document.getElementById('audioBtn').innerHTML = '<i class="material-icons">stop</i>';
+              })
+              .catch(err => {
+                  console.error("Error accessing microphone: ", err);
+                  showStatus('Could not access microphone: ' + err.message, true);
+              });
+      } else {
+          showStatus('Audio recording not supported.', true);
+      }
+  }
+
+  function stopAudioRecording() {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+          mediaRecorder.stop();
+          // UI update for audio button
+          document.getElementById('audioBtn').innerHTML = '<i class="material-icons">mic</i>';
+      }
+  }
+
+  function updatePeriodSelectOptions() {
+    const periodSelect = document.getElementById('periodSelect');
+    const now = new Date();
+    const currentMonthName = now.toLocaleString('default', { month: 'long' });
+    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const previousMonthName = previousMonth.toLocaleString('default', { month: 'long' });
+
+    const thisMonthOption = periodSelect.querySelector('option[value="thisMonth"]');
+    if (thisMonthOption) thisMonthOption.textContent = `This Month (${currentMonthName} ${now.getFullYear()})`;
+
+    const prevMonthOption = periodSelect.querySelector('option[value="previousMonth"]');
+    if (prevMonthOption) prevMonthOption.textContent = `Previous Month (${previousMonthName} ${previousMonth.getFullYear()})`;
+    
+    // Re-initialize the TomSelect instance to reflect text changes
+    if (tomSelectInstances['periodSelect']) {
+        tomSelectInstances['periodSelect'].sync();
+    }
+    // Re-initialize the select after changing text content
+    // M.FormSelect.init(periodSelect);
+  }
+
+  function promptForDateSelection(actionCallback) {
+    _currentActionAfterDateSelection = actionCallback;
+    // Reset custom dates and period select before opening
+    const periodSelect = document.getElementById('periodSelect');
+    if (periodSelect) {
+        periodSelect.value = ""; // Reset the underlying select element
+    }
+    document.getElementById('customDateRange').style.display = 'none';
+    document.getElementById('startDateSelect').value = '';
+    document.getElementById('endDateSelect').value = '';
+    
+    const modalInstance = M.Modal.getInstance(document.getElementById('dateSelectionModal'));
+    modalInstance.open();
+  }
+
+  function handleDateFilterApply() {
+    const periodValue = document.getElementById('periodSelect').value;
+    const startDate = document.getElementById('startDateSelect').value;
+    const endDate = document.getElementById('endDateSelect').value;
+
+    if (periodValue === 'custom') {
+      if (!startDate || !endDate) {
+        showStatus('Please select both Start Date and End Date for custom range.', true);
+        M.toast({html: 'Please select both Start Date and End Date.', classes: 'red rounded'});
+        return;
+      }
+      if (new Date(startDate) > new Date(endDate)) {
+        showStatus('Start Date cannot be after End Date.', true);
+        M.toast({html: 'Start Date cannot be after End Date.', classes: 'red rounded'});
+        return;
+      }
+      _dateSelectionCriteria = { type: 'dateRange', startDate: startDate, endDate: endDate };
+    } else if (periodValue) {
+      _dateSelectionCriteria = { type: 'period', value: periodValue };
+    } else {
+      showStatus('Please select a period or define a custom date range.', true);
+      M.toast({html: 'Please select a period.', classes: 'red rounded'});
+      return;
+    }
+
+    const modalInstance = M.Modal.getInstance(document.getElementById('dateSelectionModal'));
+    modalInstance.close();
+
+    if (typeof _currentActionAfterDateSelection === 'function') {
+      setLoading(true); // Show loading indicator before calling the action
+      showStatus('Fetching data for selected period...', false);
+      _currentActionAfterDateSelection(_dateSelectionCriteria); // Pass criteria to the stored callback
+    }
+  }
+
+  function fetchExpenseDataForView(selectionCriteria, callback) {
+    // setLoading and showStatus will be handled by the functions that call promptForDateSelection
+    // and then _currentActionAfterDateSelection
+
+    google.script.run
+      .withSuccessHandler(response => {
+        setLoading(false); // Stop loading indicator here after data is fetched or error
+        if (response.success) {
+          callback({ success: true, data: response.data, message: response.message || '' });
+        } else {
+          callback({ success: false, error: response.error });
+        }
+      })
+      .withFailureHandler(error => {
+        setLoading(false); // Stop loading indicator here
+        callback({ success: false, error: error.message || 'Unknown server error' });
+      })
+      .getExpenseDataForView(selectionCriteria); // Pass criteria to server
+  }
+
+  function openExpenseViewModal() {
+    closeFabMenu(); // ✅ close FAB on click
+    promptForDateSelection(function(selectedCriteria) {
+      // This is the callback that runs after date selection
+      fetchExpenseDataForView(selectedCriteria, result => { // Pass criteria to fetch
+        if (result.success) {
+          allExpensesData = result.data;
+          populateExpenseTable(allExpensesData);
+          calculateAndDisplaySummary(allExpensesData, selectedCriteria); // Pass criteria for summary title
+          showStatus(result.message || `Loaded ${allExpensesData.length} expenses.`, false);
+          const modalInstance = M.Modal.getInstance(document.getElementById('expenseViewModal'));
+          modalInstance.open();
+        } else {
+          showStatus('Error fetching expenses: ' + result.error, true);
+          console.error("Error fetching expenses:", result.error);
+        }
+      });
+    });
+
+  }
+
+  function calculateAndDisplaySummary(expenses, selectionCriteria) {
+
+    
+    if (!Array.isArray(expenses)) {
+      console.error("Expenses data is not an array:", expenses);
+      // Update UI to show error or zeros
+      document.getElementById('summaryThisMonthEntries').textContent = 'Error';
+      // ... and so on for other summary fields
+      return;
+    }
+
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonthNum = today.getMonth(); // 0-indexed
+    const currentMonth = today.getFullYear() + '-' + ('0' + (today.getMonth() + 1)).slice(-2);
+    // new way 03/06/2025
+    const summaryTitleBase = getTitleForSelectionCriteria(selectionCriteria).replace(':', ''); // Remove colon for this context
+    
+    // YYYY-MM format for comparison, matching server's date format
+    const currentMonthFilterStr = currentYear + '-' + ('0' + (currentMonthNum + 1)).slice(-2);
+
+    let thisMonthEntries = 0;
+    let thisMonthTotalAmount = 0;
+    let overallEntries = 0;
+    let overallTotalAmount = 0;
+    let entriesInPeriod = 0;
+    let totalAmountInPeriod = 0;
+    
+    entriesInPeriod = expenses.length;
+    expenses.forEach(exp => {
+      totalAmountInPeriod += parseFloat(exp.amount || 0);
+    });
+
+    expenses.forEach(exp => {
+      const expenseAmount = parseFloat(exp.amount || 0); // Ensure it's a number for summing
+
+      // Overall Summary
+      overallEntries++;
+      overallTotalAmount += expenseAmount;
+
+      // This Month Summary
+      // Ensure exp.date is in "YYYY-MM-DD" format
+      if (exp.date && typeof exp.date === 'string' && exp.date.startsWith(currentMonthFilterStr)) {
+        thisMonthEntries++;
+        thisMonthTotalAmount += expenseAmount;
+      } else if (exp.date && typeof exp.date === 'string') {
+        // Optional: Log dates not matching for debugging
+        // console.log(`Date ${exp.date} not in current month filter ${currentMonthFilterStr}`);
+      } else if (!exp.date) {
+        // console.log("Expense with no date:", exp);
+      }
+    });
+
+    // Update "This Month" summary display
+    // Format for display (e.g., "May 2025")
+    document.getElementById('currentMonthForSummary').textContent = today.toLocaleString('default', { month: 'long', year: 'numeric' });
+    document.getElementById('summaryThisMonthEntries').textContent = thisMonthEntries.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    document.getElementById('summaryThisMonthAmount').textContent = thisMonthTotalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    // Update "Overall" summary display
+    document.getElementById('selectedPeriodForSummary').textContent = summaryTitleBase || 'Current View'; // Use period title;
+    document.getElementById('summaryOverallEntries').textContent = entriesInPeriod.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    document.getElementById('summaryOverallAmount').textContent = totalAmountInPeriod.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    console.log("Total expenses array length received by client:", expenses.length); 
+    console.log("Calculated overall entries:", overallEntries);
+
+  }
+
+  function populateExpenseTable(expenses) {
+    const tableContainer = document.getElementById('expenseTableContainer');
+    if (tableContainer) {
+      tableContainer.classList.add('scrollable-table-container');
+    }
+    const tableBody = document.getElementById('expenseTableBody');
+    const tableElement = document.getElementById('expenseDataTable');
+    if (tableElement) {
+      tableElement.className = 'striped highlight responsive-table scrollable-table';
+    }
+    
+    const headerCells = document.querySelectorAll('#expenseDataTable th');
+    headerCells.forEach(th => {
+        const lowerHeaderText = th.textContent.toLowerCase();
+        if (lowerHeaderText.includes('amount')) {
+            th.classList.add('align-right', 'col-compact');
+        } else if (lowerHeaderText === 'description') {
+            th.classList.add('col-description');
+        } else if (lowerHeaderText !== 'vendor') {
+            th.classList.add('col-compact');
+        } else if (lowerHeaderText === 'subcategory') {
+            th.classList.add('col-subcategory'); // or a new class like 'col-normal'
+        }
+    });
+    
+    const headers = [
+        "Date", "Cost Center", "Category", "Subcategory",
+        "Vendor", "Description", `Amount (${CURRENCY_SYMBOL})`, "Payment Method", "Receipt"
+    ];
+    tableBody.innerHTML = ''; // Clear existing rows
+
+    if (!expenses || expenses.length === 0) {
+        const row = tableBody.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = headers.length;
+        cell.textContent = 'No expenses found for the selected period.';
+        cell.style.textAlign = 'center';
+        return;
+    }
+
+    expenses.forEach(exp => {
+        const row = tableBody.insertRow();
+
+        // An array of the data in the correct order
+        const rowData = [
+            exp.date || 'N/A',
+            exp.costCenter || 'N/A',
+            exp.primaryCategory || 'N/A',
+            exp.subcategory || 'N/A',
+            exp.vendor || 'N/A',
+            exp.description || 'N/A',
+            exp.amount ? formatAmount(exp.amount) : '0.00',
+            exp.paymentMethod || 'N/A',
+            exp.receiptLink // Special handling for this last
+        ];
+
+        // Loop through the data to create cells correctly
+        rowData.forEach((data, index) => {
+            const cell = row.insertCell();
+            cell.setAttribute('data-label', headers[index]);
+
+            const lowerHeaderText = headers[index].toLowerCase();
+            if (lowerHeaderText.includes('amount')) {
+                cell.classList.add('align-right', 'col-compact');
+            } else if (lowerHeaderText === 'description') {
+                cell.classList.add('col-description');
+            } else if (lowerHeaderText !== 'vendor') {
+                cell.classList.add('col-compact');
+            } else if (lowerHeaderText === 'subcategory') {
+                cell.classList.add('col-subcategory');
+            }
+                        
+            const headerText = headers[index];
+
+            let contentHtml = '';
+            if (headerText === "Receipt") {
+                contentHtml = data ? `<a href="${data}" target="_blank" class="tooltipped" data-tooltip="View Receipt"><i class="material-icons">link</i> View</a>` : 'N/A';
+            } else {
+                contentHtml = data;
+            }
+            cell.innerHTML = `<div class="td-content">${contentHtml}</div>`;
+        });
+    });
+
+    // Re-initialize any Materialize tooltips after updating the table
+    M.Tooltip.init(tableBody.querySelectorAll('.tooltipped'));
+}
+
+  // In JavaScript.html
+
+  function filterExpenseTable() {
+    const input = document.getElementById('expenseSearchInput');
+    const filter = input.value.toUpperCase().trim(); // trim whitespace
+    const table = document.getElementById('expenseDataTable');
+    const tbody = table.getElementsByTagName('tbody')[0];
+    const trs = tbody.getElementsByTagName('tr');
+
+    let visibleRowCount = 0;
+    let selectionTotalAmount = 0;
+    const selectionVendors = new Set();
+    const selectionCostCenters = new Set();
+    const selectionPaymentMethods = new Set();
+    const selectionSummarySection = document.getElementById('expenseSelectionSummarySection');
+
+    // Check if the table body contains actual data rows or the "No expenses found" message
+    if (trs.length === 0 || (trs.length === 1 && trs[0].getElementsByTagName('td').length === 1 && trs[0].getElementsByTagName('td')[0].colSpan === 9)) {
+      selectionSummarySection.style.display = 'none'; // Hide if table is empty or shows "No expenses"
+      return;
+    }
+
+    for (let i = 0; i < trs.length; i++) {
+      const currentRow = trs[i];
+      let displayRow = false;
+      const tds = currentRow.getElementsByTagName('td');
+      
+      if (filter.length === 0) {
+        // If no filter, all data rows are considered "not part of a selection"
+        // for the purpose of this specific summary. So, hide selection summary.
+        currentRow.style.display = ''; // Ensure row is visible
+        // No calculation needed for selection summary as there's no active "selection"
+      } else {
+        // Filter is active, check if this row matches
+        for (let j = 0; j < tds.length; j++) { 
+          if (tds[j] && tds[j].textContent.toUpperCase().indexOf(filter) > -1) {
+            displayRow = true;
+            break; 
+          }
+        }
+        currentRow.style.display = displayRow ? '' : 'none';
+
+        if (displayRow) {
+          visibleRowCount++;
+          // Extract data from the visible row's cells for summary
+          // Table columns assumed order:
+          // 0:Date, 1:CostCenter, 2:Category, 3:Subcat, 4:Vendor, 5:Desc, 6:Amount, 7:PaymentMethod
+          
+          // Add to sets (empty strings/NAs won't harm the distinct count significantly, but you could filter them)
+          if(tds[1] && tds[1].textContent !== 'N/A' && tds[1].textContent.trim() !== '') selectionCostCenters.add(tds[1].textContent.trim());
+          if(tds[4] && tds[4].textContent !== 'N/A' && tds[4].textContent.trim() !== '') selectionVendors.add(tds[4].textContent.trim());
+          if(tds[7] && tds[7].textContent !== 'N/A' && tds[7].textContent.trim() !== '') selectionPaymentMethods.add(tds[7].textContent.trim());
+          
+          // Sum amount - ensure robust parsing
+          const amountText = tds[6] ? tds[6].textContent : '0';
+          selectionTotalAmount += parseFloat(amountText.replace(/[^0-9.-]+/g,"") || 0);
+        }
+      }
+    }
+
+    if (filter.length > 0) { 
+      document.getElementById('selectionTotalEntries').textContent = visibleRowCount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      document.getElementById('selectionTotalAmount').textContent = selectionTotalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('selectionDistinctVendors').textContent = selectionVendors.size;
+      document.getElementById('selectionDistinctCostCenters').textContent = selectionCostCenters.size;
+      document.getElementById('selectionDistinctPaymentMethods').textContent = selectionPaymentMethods.size;
+      selectionSummarySection.style.display = 'block'; // Show if filter is active
+    } else {
+      selectionSummarySection.style.display = 'none'; // Hide if no filter
+    }
+  }
+
+
+
+  let celebrationTimer = null; // To store the setTimeout ID for auto-closing
+  let timerInterval = null; // To store the setInterval ID for the progress bar
+
+  function showCelebrationPopup(message,duration = 6390) {
+    const popup = document.getElementById('celebrationPopup');
+    const messageContent = document.getElementById('celebrationMessageContent');
+    const timerBarProgress = document.querySelector('#celebrationTimerBar .determinate');
+    const timerBarContainer = document.getElementById('celebrationTimerBar');
+
+    messageContent.innerHTML = message.replace(/\n/g, "<br>"); // Replace newlines with <br> for HTML
+    
+    // Reset and show timer bar
+    timerBarProgress.style.width = '100%';
+    timerBarContainer.style.display = 'block';
+
+    popup.classList.remove('hide');
+    popup.classList.add('show'); // This will trigger the fadeIn animation if defined
+
+    // Clear any existing timers
+    if (celebrationTimer) clearTimeout(celebrationTimer);
+    if (timerInterval) clearInterval(timerInterval);
+
+    // Trigger confetti
+    if (typeof confetti === 'function') {
+      confetti({
+        particleCount: 150,
+        spread: 90,
+        origin: { y: 0.6 }, // Adjust origin if needed relative to the popup
+        zIndex: 1006 // Higher than the popup itself if needed
+      });
+    }
+
+    let startTime = Date.now();
+
+    timerInterval = setInterval(() => {
+      let elapsedTime = Date.now() - startTime;
+      let progress = Math.max(0, 100 - (elapsedTime / duration) * 100);
+      timerBarProgress.style.width = progress + '%';
+      if (progress <= 0) {
+        clearInterval(timerInterval);
+      }
+    }, 100); // Update progress bar every 100ms for smoother animation
+
+    celebrationTimer = setTimeout(() => {
+      popup.classList.remove('show');
+      popup.classList.add('hide'); // This will trigger fadeOut animation
+      if (timerInterval) clearInterval(timerInterval); // Ensure interval is cleared
+      // The 'hide' animation includes 'display:none !important' at the end
+    }, duration);
+  }
+  
+function initializeTomSelects() {
+  const selectIds = ['expVendor', 'expCostCenter', 'expCombinedCategory', 'expPaymentMethod'];
+  selectIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (el.tomselect) { el.tomselect.destroy(); }
+      tomSelectInstances[id] = new TomSelect(el, {
+        create: (id === 'expVendor' || id === 'expCombinedCategory'),
+        maxOptions: 250,
+        allowEmptyOption: true,
+        sortField: { field: "text", direction: "asc" },
+        dropdownParent: 'body',
+        
+        // ---  IOS FIX ---
+        onInitialize: function() {
+          // This block runs once when the TomSelect instance is created.
+          // We are hijacking the 'mousedown' event for immediate selection.
+          const self = this;
+          self.dropdown_content.addEventListener('mousedown', function(e) {
+            // Find the option element that was tapped
+            const option = e.target.closest('[data-value]');
+            if (option) {
+              // Prevent the default browser action and stop other events
+              e.preventDefault();
+              e.stopPropagation();
+              
+              // Programmatically set the value and close the dropdown
+              const value = option.getAttribute('data-value');
+              self.setValue(value);
+              self.close();
+              self.blur();
+            }
+          });
+        }
+        // --- END IOS FIX ---
+      });
+    }
+  });
+  console.log("TomSelects initialized with iOS fix:", Object.keys(tomSelectInstances));
+}
+
+  function initializeDateModalTomSelect() {
+    const periodSelectEl = document.getElementById('periodSelect');
+    if (!periodSelectEl) return;
+
+    // Destroy existing TomSelect instance
+    if (tomSelectInstances['periodSelect']) {
+        tomSelectInstances['periodSelect'].destroy();
+    }
+
+    // Initialize new TomSelect instance
+    tomSelectInstances['periodSelect'] = new TomSelect(periodSelectEl, {
+      dropdownParent: 'body',
+      allowEmptyOption: false,
+      searchField: [],
+      onInitialize: function() {
+        this.control_input.setAttribute('readonly', true);
+      },
+      onChange: function(value) {
+        console.log('Period selection changed to:', value);
+        const customDateRange = document.getElementById('customDateRange');
+        if (value === 'custom') {
+          customDateRange.classList.add('show');
+        } else {
+          customDateRange.classList.remove('show');
+        }
+      }
+    });
+
+    console.log("Date modal TomSelect initialized/refreshed");
+  
+  }
+
+    function clearTomSelect(elementId) {
+      if (tomSelectInstances[elementId]) {
+          tomSelectInstances[elementId].clear(); // Clears the selection
+      } else {
+          // Fallback for plain select if TomSelect instance isn't found
+          const selectEl = document.getElementById(elementId);
+          if (selectEl) selectEl.value = '';
+      }
+    }
+
+    function setTomSelectOption(elementId, value, text) {
+      // text parameter is optional, if not provided, value is used as text
+      const TSText = text || value; 
+
+      if (tomSelectInstances[elementId]) {
+          const tsInstance = tomSelectInstances[elementId];
+          // Check if the option exists by value
+          if (!tsInstance.getOption(value)) {
+              // If it doesn't exist, and 'create' is false for this instance,
+              // it won'g be selectable unless added.
+              // If 'create' is true, setValue can sometimes create it.
+              // For robustness, especially when create might be false (e.g. for categories):
+              // We should ensure the underlying <select> has this option if we want to select it.
+              // However, TomSelect 'addOption' is usually preferred.
+              tsInstance.addOption({ value: value, text: TSText });
+              // tsInstance.refreshOptions(false); // Don't trigger dropdown opening
+          }
+          tsInstance.setValue(value, true); // true to silence change events if needed
+      } else {
+          // Fallback for plain select
+          const selectEl = document.getElementById(elementId);
+          if (selectEl) {
+              let optionExists = Array.from(selectEl.options).some(opt => opt.value === value);
+              if (!optionExists) { // If option doesn't exist in original select
+                  const newOpt = new Option(TSText, value);
+                  selectEl.add(newOpt);
+              }
+              selectEl.value = value;
+          }
+      }
+    }
+
+    function closeFabMenu() {      
+      autoCloseFabAfterDelay(4000); // Auto-close after 4 seconds
+    }
+
+    function autoCloseFabAfterDelay(ms = 4000) {
+      const fabEl = document.getElementById('mainFabMenu');
+      const fabInstance = M.FloatingActionButton.getInstance(fabEl);
+      if (fabInstance && fabInstance.isOpen) {
+        // Cancel any previous timer (optional: to prevent stacking timeouts)
+        if (fabEl._autoCloseTimer) clearTimeout(fabEl._autoCloseTimer);
+
+        fabEl._autoCloseTimer = setTimeout(() => {
+          fabInstance.close();
+        }, ms);
+      }
+    }
+
+    // Modify generateExpenseReport
+    function generateExpenseReport(preloadedData = null) {
+      closeFabMenu();
+
+      const buildAndShowReport = (data) => {
+        showStatus(result.message || `Loaded ${data.length} expenses.`, false);
+        
+        const container = document.getElementById('reportSections');
+        container.innerHTML = ''; // Clear previous report
+
+        // Update report title based on selection
+        let reportTitlePrefix = getTitleForSelectionCriteria(selectedCriteria);
+
+        container.appendChild(buildDetailedTable(data, `${reportTitlePrefix} Detailed Expenses (Sorted by Date)`,'receipt_long','#f1f8e9'));
+        container.appendChild(buildGroupSummary(data, 'costCenter', `${reportTitlePrefix} Cost Center Summary`, 'account_balance_wallet', '#e3f2fd'));
+        container.appendChild(buildGroupSummary(data, 'vendor', `${reportTitlePrefix} Vendor Summary`, 'store', '#fff3e0'));
+        container.appendChild(buildGroupSummary(data, 'primaryCategory', `${reportTitlePrefix} Primary Category Summary`, 'category', '#e8f5e9'));
+        container.appendChild(buildGroupSummary(data, (d) => `${d.primaryCategory} → ${d.subcategory}`, `${reportTitlePrefix} Primary–Subcategory Summary`, 'segment', '#ede7f6'));
+        container.appendChild(buildGroupSummary(data, 'paymentMethod', `${reportTitlePrefix} Payment Method Summary`, 'credit_card', '#fce4ec'));
+        container.appendChild(buildGroupSummary(data, 'email', `${reportTitlePrefix} User-wise Summary`, 'person', '#e0f7fa')); 
+        container.appendChild(buildMonthYearComparison(data,`${reportTitlePrefix} Month-Year Summary with Last Year Comparison`, 'date_range', '#e1f5fe'));
+        container.appendChild(buildWeekdaySummary(data,`${reportTitlePrefix} Summary by Weekday`, 'calendar_today', '#f3e5f5'));
+        document.getElementById('reportContainer').style.display = 'block';
+        document.getElementById('reportContainer').scrollIntoView({ behavior: 'smooth' });
+      };
+
+      if (preloadedData) {
+        // Data was provided directly from the AI, build the report immediately.
+        allExpensesData = preloadedData;
+        buildAndShowReport(preloadedData);
+      } else {
+        promptForDateSelection(function(selectedCriteria) {
+          // This is the callback that runs after date selection
+          fetchExpenseDataForView(selectedCriteria, result => { // Pass criteria to fetch
+            if (result.success) {
+              allExpensesData = result.data;
+              buildAndShowReport(result.data);
+            } else {
+              showStatus('Error fetching expenses for report: ' + result.error, true);
+              console.error("Error fetching expenses for report:", result.error);
+            }
+          });
+        });
+      }
+    }
+
+    // Helper function to get a user-friendly title for the selected criteria
+    function getTitleForSelectionCriteria(criteria) {
+      if (!criteria) return "Overall";
+      if (criteria.type === 'dateRange') {
+          return `Custom Range (${criteria.startDate} to ${criteria.endDate}):`;
+      } else if (criteria.type === 'period') {
+          const periodSelect = document.getElementById('periodSelect');
+          const selectedOption = periodSelect.querySelector(`option[value="${criteria.value}"]`);
+          return selectedOption ? `${selectedOption.textContent}:` : `${criteria.value}:`;
+      }
+      return "Overall";
+    }
+
+    // 1️⃣ Detailed Expense Table
+    function buildDetailedTable(data, title, icon, bgColor) {
+      const section = document.createElement('section');
+      section.classList.add('pdf-section'); // ✅ Adds page break
+      section.style.backgroundColor = bgColor || '#fafafa';
+      section.style.padding = '20px';
+      section.style.borderRadius = '8px';
+      section.style.marginBottom = '30px';
+
+      const sorted = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // ⬇️ Compute total count and amount first
+      let totalAmount = 0;
+      let totalCount = sorted.length;
+
+      sorted.forEach(exp => {
+        totalAmount += parseFloat(exp.amount) || 0; // ensure numeric
+      });
+      
+      section.innerHTML = `
+        <h5 style="color:#333; display:flex; align-items:center; justify-content:space-between;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <i class="material-icons">${icon || 'table_chart'}</i> ${title}
+          </span>
+          <span style="font-weight: normal; font-size: 0.95rem; color: #555;">
+            Total: 💰 ${totalCount} items • ${formatAmount(totalAmount)}
+          </span>
+        </h5>
+      `;
+
+      const table = document.createElement('table');
+      table.classList.add('summary-table');
+
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Date</th><th>Cost Center</th><th>Category</th><th>Subcategory</th><th>Vendor</th>
+            <th>Description</th><th>Amount (${CURRENCY_SYMBOL})</th><th>Payment Method</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sorted.map(exp => `
+            <tr>
+              <td>${formatDateForDisplay(exp.date)}</td><td>${exp.costCenter}</td><td>${exp.primaryCategory}</td><td>${exp.subcategory}</td>
+              <td>${exp.vendor}</td><td>${exp.description}</td><td>${formatAmount(exp.amount)}</td><td>${exp.paymentMethod}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      `;
+      section.appendChild(table);
+      return section;
+    }
+
+
+    // 2️⃣–6️⃣ Group Summary (Generic)
+    function buildGroupSummary(data, key, title, icon, bgColor) {
+      const section = document.createElement('section');
+      section.classList.add('pdf-section'); // ✅ Adds page break
+      section.style.backgroundColor = bgColor || '#fafafa';
+      section.style.padding = '20px';
+      section.style.borderRadius = '8px';
+      section.style.marginBottom = '30px';
+
+      const group = {};
+
+      // data.forEach(exp => {
+      //   const groupKey = typeof key === 'function' ? key(exp) : exp[key];
+      //   if (!group[groupKey]) group[groupKey] = 0;
+      //   group[groupKey] += Number(exp.amount);
+      // });
+
+      // const sorted = Object.entries(group).sort((a, b) => b[1] - a[1]); // ✅ Highest to lowest
+
+      // ⬇️ New grouping logic with count + total
+      data.forEach(exp => {
+        const groupKey = typeof key === 'function' ? key(exp) : exp[key];
+        if (!group[groupKey]) {
+          group[groupKey] = { total: 0, count: 0 };
+        }
+        group[groupKey].total += Number(exp.amount);
+        group[groupKey].count += 1;
+      });
+
+      // ⬇️ Compute total count and amount first
+      let totalAmount = 0;
+      let totalCount = 0;
+      Object.values(group).forEach(({ total, count }) => {
+        totalAmount += total;
+        totalCount += count;
+      });
+    
+      section.innerHTML = `
+        <h5 style="color:#333; display:flex; align-items:center; justify-content:space-between;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <i class="material-icons">${icon || 'table_chart'}</i> ${title}
+          </span>
+          <span style="font-weight: normal; font-size: 0.95rem; color: #555;">
+            Total: 💰 ${totalCount} items • ${formatAmount(totalAmount)}
+          </span>
+        </h5>
+      `;
+      
+      const sorted = Object.entries(group).sort((a, b) => b[1].total - a[1].total); // ✅ Highest to lowest
+
+      const table = document.createElement('table');
+      table.classList.add('summary-table');
+
+      // ✅ Build table
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>${title}</th>
+            <th data-sort-method="number">Count</th>
+            <th data-sort-method="number">Total (${CURRENCY_SYMBOL})</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sorted.map(([name, stats]) => `<!-- ✅ Using sorted array -->
+            <tr>
+              <td>${name}</td>
+              <td>${stats.count}</td>
+              <td>${formatAmount(stats.total)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      `;
+      section.appendChild(table);
+      return section;
+    }
+
+    //7️⃣ Month-Year Comparison with Last Year
+    function buildMonthYearComparison(data, title, icon, bgColor) {
+      const section = document.createElement('section');
+      section.classList.add('pdf-section'); // ✅ Adds page break
+      section.style.backgroundColor = bgColor || '#fafafa';
+      section.style.padding = '20px';
+      section.style.borderRadius = '8px';
+      section.style.marginBottom = '30px';
+
+      const grouped = {};
+      let totalAmount = 0;
+      let totalCount = 0;
+      
+      data.forEach(exp => {
+        const [year, month] = exp.date.split('-');
+        const key = `${month}-${year}`;
+        if (!grouped[key]) grouped[key] = 0;
+        grouped[key] += Number(exp.amount);
+
+        totalAmount += Number(exp.amount);
+        totalCount += 1;
+      });
+
+      const rows = Object.keys(grouped).map(key => {
+        const [month, year] = key.split('-');
+        const lastYearKey = `${month}-${+year - 1}`;
+        const thisYearAmt = grouped[key];
+        const lastYearAmt = grouped[lastYearKey] || 0;
+        const delta = lastYearAmt === 0 ? '' : ((thisYearAmt - lastYearAmt) / lastYearAmt * 100).toFixed(1) + '%';
+
+        let deltaStyle = '';
+        if (delta) {
+          deltaStyle = parseFloat(delta) >= 0 ? 'color: green;' : 'color: red;';
+        }
+
+        return `
+          <tr>
+            <td>${month}-${year}</td>
+            <td>${formatAmount(thisYearAmt)}</td>
+            <td>${formatAmount(lastYearAmt)}</td>
+            <td style="${deltaStyle}">${delta || '–'}</td>
+          </tr>
+          `;
+      });
+
+      // ✅ Header with totals
+      section.innerHTML = `
+        <h5 style="color:#333; display:flex; align-items:center; justify-content:space-between;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <i class="material-icons">${icon || 'date_range'}</i> ${title}
+          </span>
+          <span style="font-weight: normal; font-size: 0.95rem; color: #555;">
+            Total: 💰 ${totalCount} items • ${formatAmount(totalAmount)}
+          </span>
+        </h5>
+      `;
+
+      const table = document.createElement('table');
+      table.classList.add('summary-table');
+      table.innerHTML = `
+        <thead><tr><th>Month-Year</th><th>This Year</th><th>Last Year</th><th>Change (%)</th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+      `;
+      section.appendChild(table);
+      return section;
+    }
+
+    // 8️⃣ Weekday Summary
+    function buildWeekdaySummary(data, title, icon, bgColor) {
+      const section = document.createElement('section');
+      section.classList.add('pdf-section');
+      section.style.backgroundColor = bgColor || '#fafafa';
+      section.style.padding = '20px';
+      section.style.borderRadius = '8px';
+      section.style.marginBottom = '30px';
+
+      const group = {};
+      const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+      data.forEach(exp => {
+        const day = new Date(exp.date).getDay();
+        const name = weekdays[day];
+        if (!group[name]) group[name] = { total: 0, count: 0 };
+        group[name].total += Number(exp.amount);
+        group[name].count += 1;
+      });
+
+      // ⬇️ Compute total count and amount first
+      let totalAmount = 0;
+      let totalCount = 0;
+      Object.values(group).forEach(({ total, count }) => {
+        totalAmount += total;
+        totalCount += count;
+      });
+    
+      section.innerHTML = `
+        <h5 style="color:#333; display:flex; align-items:center; justify-content:space-between;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <i class="material-icons">${icon || 'table_chart'}</i> ${title}
+          </span>
+          <span style="font-weight: normal; font-size: 0.95rem; color: #555;">
+            Total: 💰 ${totalCount} items • ${formatAmount(totalAmount)}
+          </span>
+        </h5>
+      `;
+
+      const sorted = Object.entries(group).sort((a, b) => b[1].total - a[1].total);
+
+      const table = document.createElement('table');
+      table.classList.add('summary-table', 'sortable');
+      table.innerHTML = `
+        <thead><tr><th>Weekday</th><th>Count</th><th>Total (${CURRENCY_SYMBOL})</th></tr></thead>
+        <tbody>
+          ${sorted.map(([k, stats]) => `
+            <tr>
+              <td>${k}</td>
+              <td>${stats.count}</td>
+              <td>${formatAmount(stats.total)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      `;
+
+      section.appendChild(table);
+      return section;
+    }
+
+
+
+
+    function buildDetailedExpensesData(data, title) {
+      const sorted = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // ⬇️ Compute total count and amount first
+      let totalAmount = 0;
+      let totalCount = sorted.length;
+
+      sorted.forEach(exp => {
+        totalAmount += parseFloat(exp.amount) || 0; // ensure numeric
+      });
+
+      const rows = sorted.map(exp => [
+        formatDateForDisplay(exp.date),
+        exp.costCenter,
+        exp.primaryCategory,
+        exp.subcategory,
+        exp.vendor,
+        exp.description,
+        formatAmount(exp.amount),
+        exp.paymentMethod
+      ]);
+
+      return {
+        title: `${title} [Total: ${formatAmount(totalAmount)} • ${totalCount} items]`,
+        headers: ['Date', 'Cost Center', 'Category', 'Subcategory', 'Vendor', 'Description', `Amount (${CURRENCY_SYMBOL})`, 'Payment Method'],
+        rows
+      };
+    }
+
+    function buildGroupSummaryData(data, key, title) {
+      const group = {};
+
+      data.forEach(exp => {
+        const groupKey = typeof key === 'function' ? key(exp) : exp[key];
+        if (!group[groupKey]) {
+          group[groupKey] = { total: 0, count: 0 };
+        }
+        group[groupKey].total += Number(exp.amount);
+        group[groupKey].count += 1;
+      });
+
+      // ⬇️ Compute total count and amount first
+      let totalAmount = 0;
+      let totalCount = 0;
+      Object.values(group).forEach(({ total, count }) => {
+        totalAmount += total;
+        totalCount += count;
+      });
+
+      const sorted = Object.entries(group)
+        .map(([name, stats]) => ({
+          name,
+          count: stats.count,
+          total: stats.total
+        }))
+        .sort((a, b) => b.total - a.total); // Sort descending by total
+
+      return {
+        title: `${title} [Total: ${formatAmount(totalAmount)} • ${totalCount} items]`,
+        headers: [title, 'Count', `Total (${CURRENCY_SYMBOL})`],
+        rows: sorted.map(item => [
+          item.name,
+          item.count,
+          formatAmount(item.total)
+        ])
+      };
+    }
+
+    function buildMonthYearComparisonData(data, title) {
+      const currentYear = new Date().getFullYear();
+      const lastYear = currentYear - 1;
+
+      const currentYearData = {};
+      const lastYearData = {};
+      let totalAmount = 0;
+      let totalCount = 0;
+
+      data.forEach(exp => {
+        const date = new Date(exp.date);
+        const monthYear = `${date.toLocaleString('default', { month: 'short' })} ${date.getFullYear()}`;
+
+        if (date.getFullYear() === currentYear) {
+          if (!currentYearData[monthYear]) currentYearData[monthYear] = 0;
+          currentYearData[monthYear] += Number(exp.amount);
+
+          totalAmount += Number(exp.amount);
+          totalCount += 1;
+        } else if (date.getFullYear() === lastYear) {
+          if (!lastYearData[monthYear]) lastYearData[monthYear] = 0;
+          lastYearData[monthYear] += Number(exp.amount);
+        }
+      });
+
+      const months = Object.keys({ ...currentYearData, ...lastYearData }).sort(
+        (a, b) => new Date(a).getTime() - new Date(b).getTime()
+      );
+
+      const rows = months.map(month => {
+        const thisYear = currentYearData[month] || 0;
+        const prevYear = lastYearData[month] || 0;
+        const change = prevYear === 0
+          ? '∞'
+          : ((thisYear - prevYear) / prevYear * 100).toFixed(1) + '%';
+
+        return [
+          month,
+          formatAmount(thisYear),
+          formatAmount(prevYear),
+          change
+        ];
+      });
+
+      return {
+        title: `${title} — Total: ${totalCount} items • ${formatAmount(totalAmount)}`,
+        headers: ['Month-Year', 'This Year', 'Last Year', 'Change (%)'],
+        rows
+      };
+    }
+
+
+    function buildWeekdaySummaryData(data,title) {
+      const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const group = {};
+
+      data.forEach(exp => {
+        const dayIndex = new Date(exp.date).getDay();
+        const dayName = weekdays[dayIndex];
+        if (!group[dayName]) group[dayName] = { total: 0, count: 0 };
+        group[dayName].total += Number(exp.amount);
+        group[dayName].count += 1;
+      });
+
+      // ⬇️ Compute total count and amount first
+      let totalAmount = 0;
+      let totalCount = 0;
+      Object.values(group).forEach(({ total, count }) => {
+        totalAmount += total;
+        totalCount += count;
+      });
+
+      const sorted = Object.entries(group).sort((a, b) => b[1].total - a[1].total);
+
+      const headers = ['Weekday', 'Count', `Total (${CURRENCY_SYMBOL})`];
+      const rows = sorted.map(([day, stats]) => [
+        day,
+        stats.count,
+        formatAmount(stats.total)
+      ]);
+
+      return {
+        title: `${title} [Total: ${formatAmount(totalAmount)} • ${totalCount} items]`,
+        headers,
+        rows
+      };
+    }
+
+    function exportReportToPDF_V2() {
+      try{
+        setLoading(true);
+        showStatus('Preparing data to export', false);
+        
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('landscape', 'pt', 'a4');
+
+        // doc.addFileToVFS('Sarabun-Regular.ttf', Sarabun_Regular);
+        // doc.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+
+        // doc.addFileToVFS('NotoSansDevanagari-Regular.ttf', NotoSansDevanagari_Regular);
+        // doc.addFont('NotoSansDevanagari-Regular.ttf', 'NotoSansDevanagari', 'normal');
+        
+        
+        doc.setFont('Prompt','normal'); //set font family
+        
+        // Set metadata (PDF Info dictionary)
+        doc.setProperties({
+          title: 'Ai Expense Logger Report',
+          subject: 'Expense Insights',
+          author: 'Ai Expense Logger App',
+          keywords: 'expense report, ai expense, finance, pdf',
+          creator: 'AI-Powered Expense Tracker v1.0',
+          creationDate: new Date(),
+          modDate: new Date()
+        });
+        
+        // Set font (UTF-8 safe)
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(16);
+
+        let currentPageY = 50;
+
+        // 🔹 Section header helper
+        function addSectionHeader(title) {
+          // Force page break if near bottom
+          if (currentPageY > doc.internal.pageSize.getHeight() - 100) {
+            doc.addPage();
+            currentPageY = 50;
+          }
+
+          doc.setTextColor(40);
+          doc.setFontSize(16);
+          doc.text(title, 40, currentPageY);
+          currentPageY += 30;
+        }
+
+        // 🔹 Table helper
+        function addTable(headers, rows) {
+          doc.autoTable({
+            head: [headers],
+            body: rows,
+            startY: currentPageY,
+            theme: 'striped',
+            styles: {
+              fontSize: 10,
+              cellPadding: 6,
+              overflow: 'linebreak',
+            },
+            headStyles: {
+              fillColor: [41, 128, 185],
+              textColor: 255
+            },
+            margin: { left: 40, right: 40 },
+            didDrawPage: () => {
+              currentPageY = 40;
+            }
+          });
+
+          currentPageY = doc.lastAutoTable.finalY + 40;
+        }
+
+        // 🔹 Wrapper for each section
+        function addSection(dataFunc) {
+          const section = dataFunc();
+          currentPageY = 50;
+          addSectionHeader(section.title);
+          addTable(section.headers, section.rows);
+          doc.addPage(); // ✅ Always start a new page for the next section
+        }
+
+        // 🔹 SECTION 1: Detailed Expenses
+        addSection(() => buildDetailedExpensesData(allExpensesData,'Section 1: Detailed Expenses (Sorted by Date)'));
+
+        // 🔹 SECTIONS 2–7: Group Summaries
+        addSection(() => buildGroupSummaryData(allExpensesData, 'costCenter', 'Section 2: Cost Center Summary'));
+        addSection(() => buildGroupSummaryData(allExpensesData, 'vendor', 'Section 3: Vendor Summary'));
+        addSection(() => buildGroupSummaryData(allExpensesData, 'primaryCategory', 'Section 4: Primary Category Summary'));
+        addSection(() => buildGroupSummaryData(allExpensesData, d => `${d.primaryCategory} → ${d.subcategory}`, 'Section 5: Primary–Subcategory Summary'));
+        addSection(() => buildGroupSummaryData(allExpensesData, 'paymentMethod', 'Section 6: Payment Method Summary'));
+        addSection(() => buildGroupSummaryData(allExpensesData, 'email', 'Section 7: User-wise Summary'));
+      
+        // 🔹 SECTION 8: Month-Year Comparison
+        addSection(() => buildMonthYearComparisonData(allExpensesData,'Month-Year Summary with Last Year Comparison'));
+
+        // 🔹 SECTION 9: Summary by Weekday
+        addSection(() => buildWeekdaySummaryData(allExpensesData,'Summary by Weekday'));
+
+        
+        showStatus('PDF data prepared, now exporting ...', false);
+        doc.save('Ai_Expense_Logger_Report.pdf');
+        
+        setLoading(false);
+        showStatus('PDF Exported', false);
+
+      } catch (err) {
+        setLoading(false);
+        showStatus('Unexpected Error: ' + (err?.message || err), true);
+        console.error("Export to PDF V2 error:", err);
+      }
+    }
+
+    function exportReportToPDF() {
+      try {
+        setLoading(true);
+        showStatus('Preparing data to export...', false);
+
+        const original = document.getElementById('reportSections');
+
+        if (!original) throw new Error('reportSections element not found.');
+
+        // Remove buttons/icons
+        // clone.querySelectorAll('.no-print, .btn-floating, .action-buttons, .export-btn').forEach(el => el.remove());
+        const clone = original.cloneNode(true);
+
+        console.log("Cloned node content for PDF:", clone);
+        showStatus('Rendering PDF...', false);
+
+        html2pdf()
+          .set({
+            margin: [0.5, 0.5, 0.5, 0.5],
+            filename: 'Ai_Expense_Logger_Report.pdf',
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: {
+              scale: 2,//window.devicePixelRatio * 2,
+              scrollY: 0 
+              // width: 1200
+            },
+            jsPDF: {
+              unit: 'in',
+              format: 'a4',
+              orientation: 'landscape'//portrait
+            }
+          })
+          .from(clone)
+          .save()
+          .then(() => {
+            setLoading(false);
+            showStatus('✅ PDF exported successfully.', false);
+          })
+          .catch(err => {
+            setLoading(false);
+            showStatus('❌ Failed to export PDF: ' + err.message, true);
+            console.error("html2pdf error:", err);
+          });
+
+      } catch (err) {
+        setLoading(false);
+        showStatus('Unexpected Error: ' + (err?.message || err), true);
+        console.error("Export to PDF error:", err);
+      }
+    }
+
+  function openEmailSearchModal() {
+    console.log('Opening Email Search Modal...');
+    const modalInstance = M.Modal.getInstance(document.getElementById('emailResultsModal'));
+    modalInstance.open();
+
+    // Reset the UI to a loading state
+    const tableBody = document.getElementById('emailResultsTableBody');
+    tableBody.innerHTML = '';
+    document.getElementById('emailLoader').style.display = 'block';
+    document.getElementById('emailSearchSummary').textContent = 'Searching for new, un-processed emails...';
+    
+    const selectAllCheckbox = document.getElementById('selectAllEmails');
+    selectAllCheckbox.checked = false; // Uncheck "select all"
+    selectAllCheckbox.onchange = function() {
+        document.querySelectorAll('.email-select-cb').forEach(cb => cb.checked = this.checked);
+    };
+    
+    const userQuery = document.getElementById('emailSearchFilter').value;
+
+    // The single, efficient call to the server
+    google.script.run
+      .withSuccessHandler(onReceiveEmailSummaries)
+      .withFailureHandler(handleEmailServerError)
+      .searchExpenseEmails(userQuery, "summary"); // Using our new unified function
+  }
+
+  function onReceiveEmailSummaries(response) {
+    const loaderEl = document.getElementById('emailLoader');
+    const summaryEl = document.getElementById('emailSearchSummary');
+    const tableBodyEl = document.getElementById('emailResultsTableBody');
+    
+    loaderEl.style.display = 'none'; // All data is here, hide the loader.
+
+    if (response.error) {
+      handleEmailServerError({ message: response.error });
+      return;
+    }
+
+    const emailSummaries = response.emails;
+
+    if (!emailSummaries || emailSummaries.length === 0) {
+      summaryEl.textContent = `No new, un-processed emails found.`;
+      tableBodyEl.innerHTML = '<tr><td colspan="8" class="center-align grey-text">No matching emails found.</td></tr>';
+      return;
+    }
+
+    // Loop through the received data and render each row. This is all client-side and fast.
+    emailSummaries.forEach((summary, index) => {
+      renderEmailRow(summary); // Pass the summary object to the rendering function
+    });
+
+    summaryEl.textContent = `Displaying ${emailSummaries.length} potential expense emails.`;
+    M.Tooltip.init(document.querySelectorAll('#emailResultsModal .tooltipped')); // Re-init tooltips
+  }
+
+  // In JavaScript.html, replace the broken renderEmailRow function with this corrected version.
+
+function renderEmailRow(summary) {
+    const tableBody = document.getElementById('emailResultsTableBody');
+    const row = tableBody.insertRow();
+    
+    const threadId = summary.threadId; 
+    const htmlSafeSender = escapeHtml(summary.sender);
+    const htmlSafeSubject = escapeHtml(summary.subject);
+    
+    // --- THIS IS THE CORRECTED LINE ---
+    const gmailLink = 'https:\/\/mail.google.com/mail/u/0/#inbox/'+ threadId;
+    
+    const htmlSafeSnippet = escapeHtml(summary.bodySnippet);
+
+    const attachmentsHtml = summary.hasAttachment 
+        ? `<div class="attachment-chip single-attachment">
+               <span><i class="material-icons tiny">attach_file</i> Attachment</span>
+           </div>`
+        : '<span class="grey-text">None</span>';
+
+    // Note: The checkbox now also correctly uses data-thread-id
+    row.innerHTML = `
+        <td><label><input type="checkbox" class="email-select-cb" data-thread-id="${threadId}" /><span></span></label></td>
+        <td></td> <!-- Placeholder for Status -->
+        <td>${summary.date}</td>
+        <td><div class="truncate-cell" title="${htmlSafeSender}">${htmlSafeSender}</div></td>
+        <td>
+          <div class="truncate-cell tooltipped" data-tooltip="${htmlSafeSubject}">${htmlSafeSubject}</div>
+          <a href="${gmailLink}" target="_blank" class="open-email-link tooltipped" data-position="top" data-tooltip="Open Email">
+            <i class="material-icons tiny">open_in_new</i>
+          </a>
+        </td>
+        <td><div class="truncate-cell tooltipped" data-tooltip="${htmlSafeSnippet}">${htmlSafeSnippet}</div></td>
+        <td>${attachmentsHtml}</td>
+        <td>
+          <button class="btn-small waves-effect waves-light green" onclick="handleEmailSelection(this, '${threadId}')">Use</button>
+        </td>`;
+}
+
+  function renderMultiExpenseRow(data, rowIndex) {
+    const tableBody = document.getElementById('multiExpenseConfirmTableBody');
+    const row = tableBody.insertRow();
+    row.id = `multi-row-${rowIndex}`;
+
+    // By using a single template literal (backticks ``), the code is cleaner
+    // and we avoid the error caused by a misplaced semicolon.
+    row.innerHTML = `
+        <td><input type="date" class="table-input" id="multi-date-${rowIndex}" value="${data.date || ''}"></td>
+        <td><select id="multi-cat-${rowIndex}"></select></td>
+        <td><select id="multi-vendor-${rowIndex}" placeholder="Select vendor..."></select></td>
+        <td><textarea class="table-textarea" id="multi-desc-${rowIndex}">${data.description || ''}</textarea></td>
+        <td><input type="number" step="0.01" class="table-input amount-input" id="multi-amount-${rowIndex}" value="${data.amount || ''}" oninput="updateMultiSummary()"></td>
+        <td><select id="multi-cc-${rowIndex}"></select></td>
+        <td><select id="multi-pm-${rowIndex}"></select></td>
+        <input type="hidden" id="multi-threadId-${rowIndex}" value="${data.threadId || ''}">
+        <input type="hidden" id="multi-aiDate-${rowIndex}" value="${data.date || ''}">
+        <input type="hidden" id="multi-aiCat-${rowIndex}" value="${data.primaryCategory || ''}">
+        <input type="hidden" id="multi-aiSubCat-${rowIndex}" value="${data.subcategory || ''}">
+        <input type="hidden" id="multi-aiAmount-${rowIndex}" value="${data.amount || ''}">
+        <input type="hidden" id="multi-aiVendor-${rowIndex}" value="${data.vendor || ''}">
+        <input type="hidden" id="multi-ocrText-${rowIndex}" value="${escapeHtml(data.extractedPlainText) || ''}">
+    `; // The semicolon now correctly goes at the end of the entire statement.
+
+    // Now, initialize TomSelect for the new controls in this row
+    initializeTomSelectsForRow(rowIndex, data);
+    updateMultiSummary();
+  }
+
+  function initializeTomSelectsForRow(rowIndex, data) {
+    // Category
+    const catSelect = new TomSelect(`#multi-cat-${rowIndex}`, { dropdownParent: 'body' });
+    Object.entries(helperData.subcategoriesMap).forEach(([primaryCat, subCats]) => {
+        subCats.forEach(subCat => {
+            catSelect.addOption({ value: `${subCat}|${primaryCat}`, text: `${subCat} [${primaryCat}]` });
+        });
+    });
+    if (data.primaryCategory && data.subcategory) {
+      catSelect.setValue(`${data.subcategory}|${data.primaryCategory}`);
+    }
+
+    // Vendor (creatable)
+    const vendorSelect = new TomSelect(`#multi-vendor-${rowIndex}`, { dropdownParent: 'body', create: true });
+    helperData.vendors.forEach(v => vendorSelect.addOption({value: v, text: v}));
+    if (data.vendor) {
+      if (!vendorSelect.getOption(data.vendor)) vendorSelect.addOption({value: data.vendor, text: data.vendor});
+      vendorSelect.setValue(data.vendor);
+    }
+    
+    // Cost Center
+    const ccSelect = new TomSelect(`#multi-cc-${rowIndex}`, { dropdownParent: 'body' });
+    helperData.costCenters.forEach(v => ccSelect.addOption({value: v, text: v}));
+    if (data.costCenter) ccSelect.setValue(data.costCenter);
+
+    // Payment Method
+    const pmSelect = new TomSelect(`#multi-pm-${rowIndex}`, { dropdownParent: 'body' });
+    helperData.paymentMethods.forEach(v => pmSelect.addOption({value: v, text: v}));
+    if (data.paymentMethod) pmSelect.setValue(data.paymentMethod);
+  }
+
+  function renderEmailRow(item, rowIndex) {
+    const tableBody = document.getElementById('emailResultsTableBody');
+    const row = tableBody.insertRow();
+    row.setAttribute('data-row-index', rowIndex); // Add index for easier selection
+
+    const jsSafeMessageId = escapeJsString(item.messageId);
+    const htmlSafeSender = escapeHtml(item.sender);
+    const htmlSafeSubject = escapeHtml(item.subject);
+    const gmailLink = 'https:\/\/mail.google.com/mail/u/0/#inbox/' + item.threadId;
+    const htmlSafeSnippet = escapeHtml(item.bodySnippet);
+
+    const statusBadge = item.isProcessed ? `<span class='badge new green processed' data-badge-caption="">Processed</span>` : '';
+
+    let attachmentsHtml = '';
+    if (item.attachments && item.attachments.length > 0) {
+        if (item.attachments.length > 1) {
+            // More than one attachment: Use a <select> dropdown
+            const selectId = `attachment-select-${rowIndex}`;
+            attachmentsHtml = `<select id="${selectId}" class="attachment-select" placeholder="Select attachment..."></select>`;
+        } else {
+            // One attachment: Display it simply
+            const att = item.attachments[0];
+            attachmentsHtml = `<div class="attachment-chip single-attachment" data-attachment-name="${escapeHtml(att.name)}">
+                <span><i class="material-icons">attach_file</i> ${escapeHtml(att.name)}</span>
+            </div>`;
+        }
+    } else {
+        attachmentsHtml = '<span class="grey-text">None</span>';
+    }
+
+    row.innerHTML = `
+        <td><label><input type="checkbox" class="email-select-cb" data-message-id="${jsSafeMessageId}" data-thread-id="${item.threadId}" /><span></span></label></td>
+        <td class="processed-status">${statusBadge}</td>
+        <td>${item.date}</td>
+        <td><div class="truncate-cell" title="${htmlSafeSender}">${htmlSafeSender}</div></td>
+        <td>
+          <div class="truncate-cell tooltipped" data-tooltip="${htmlSafeSubject}">${htmlSafeSubject}</div>
+          <a href="${gmailLink}" target="_blank" class="open-email-link tooltipped" data-position="top" data-tooltip="Open Email">
+            <i class="material-icons tiny">open_in_new</i>
+          </a>
+        </td>
+        <td><div class="truncate-cell tooltipped" data-tooltip="${htmlSafeSnippet}">${htmlSafeSnippet}</div></td>
+        <td>${attachmentsHtml}</td>
+        <td>
+          <button class="btn-small waves-effect waves-light green" onclick="handleEmailSelection(this, '${jsSafeMessageId}', '${item.threadId}')">Use</button>
+        </td>`;
+
+    // After adding the row, initialize TomSelect if needed
+    if (item.attachments && item.attachments.length > 1) {
+        const selectEl = document.getElementById(`attachment-select-${rowIndex}`);
+        const ts = new TomSelect(selectEl, {
+            dropdownParent: 'body'
+        });
+        item.attachments.forEach(att => {
+            ts.addOption({ value: att.name, text: att.name });
+        });
+        ts.setValue(item.attachments[0].name); // Pre-select the first one
+    }
+}
+
+
+function handleMultipleEmailSelection() {
+    const modalInstance = M.Modal.getInstance(document.getElementById('emailResultsModal'));
+    modalInstance.close();
+
+    const selectedCheckboxes = document.querySelectorAll('.email-select-cb:checked');
+    if (selectedCheckboxes.length === 0) {
+      M.toast({html: 'Please select at least one email.'});
+      return;
+    }
+  
+    setLoading(true);
+    showStatus(`Processing ${selectedCheckboxes.length} emails with AI...`, false);
+    document.getElementById('multiExpenseConfirmArea').style.display = 'block';
+    document.getElementById('multiExpenseConfirmTableBody').innerHTML = '';
+    updateMultiSummary();
+
+    // Create an array of promises to run all AI processing in parallel
+    const processingPromises = Array.from(selectedCheckboxes).map((cb, index) => {
+      return new Promise((resolve) => {
+        const threadId = cb.dataset.threadId;
+        google.script.run
+          .withSuccessHandler(response => resolve({ status: 'success', data: response, index: index }))
+          .withFailureHandler(error => resolve({ status: 'error', error: error, threadId: threadId }))
+          .processSingleEmailForMulti(threadId, null);
+      });
+    });
+
+    // Wait for all promises to finish
+    Promise.all(processingPromises).then(results => {
+      // Sort successful results by their original index to maintain order
+      const successfulResults = results.filter(r => r.status === 'success' && r.data && !r.data.error);
+      successfulResults.sort((a, b) => a.index - b.index);
+
+      successfulResults.forEach(result => {
+        renderMultiExpenseRow(result.data, result.index);
+      });
+
+      setLoading(false);
+      showStatus('All emails processed. Please review.', false);
+    });
+  }
+
+  function updateMultiSummary() {
+    const rows = document.querySelectorAll('#multiExpenseConfirmTableBody tr');
+    let totalAmount = 0;
+    rows.forEach(row => {
+      const amountInput = row.querySelector('.amount-input');
+      if (amountInput) {
+        totalAmount += parseFloat(amountInput.value) || 0;
+      }
+    });
+    document.getElementById('multiRecordCount').textContent = rows.length;
+    document.getElementById('multiAmountSum').textContent = `${CURRENCY_SYMBOL}${totalAmount.toFixed(2)}`;
+  }
+
+  function submitAllProcessedExpenses() {
+    setLoading(true);
+    showStatus('Submitting all expenses...', false);
+
+    const expenseDataArray = [];
+    const rows = document.querySelectorAll('#multiExpenseConfirmTableBody tr');
+
+    rows.forEach(function(row) {
+      var rowIndex = row.id.split('-')[2];
+      var catValue = document.getElementById('multi-cat-' + rowIndex).value || '|';
+      var subcategory = catValue.split('|')[0];
+      var primaryCategory = catValue.split('|')[1];
+
+      expenseDataArray.push({
+        dateOfExpense: document.getElementById('multi-date-' + rowIndex).value,
+        primaryCategory: primaryCategory,
+        subcategory: subcategory,
+        vendorMerchant: document.getElementById('multi-vendor-' + rowIndex).value,
+        itemDescription: document.getElementById('multi-desc-' + rowIndex).value,
+        amountBaseCurrency: document.getElementById('multi-amount-' + rowIndex).value,
+        costCenter: document.getElementById('multi-cc-' + rowIndex).value,
+        paymentMethod: document.getElementById('multi-pm-' + rowIndex).value,
+        threadId: document.getElementById('multi-threadId-' + rowIndex).value,
+        aiDate: document.getElementById('multi-aiDate-' + rowIndex).value,
+        aiCategory: document.getElementById('multi-aiCat-' + rowIndex).value,
+        aiSubCategory: document.getElementById('multi-aiSubCat-' + rowIndex).value,
+        aiAmount: document.getElementById('multi-aiAmount-' + rowIndex).value,
+        aiVendor: document.getElementById('multi-aiVendor-' + rowIndex).value,
+        ocrText: document.getElementById('multi-ocrText-' + rowIndex).value
+      });
+    });
+
+
+    google.script.run
+      .withSuccessHandler(response => {
+        setLoading(false);
+        if (response.success) {
+          showCelebrationPopup(response.count + 'expenses saved successfully!');
+          cancelMultiExpense(); // Clear the form
+        } else {
+          showStatus(`Error saving expenses: ${response.error}`, true);
+        }
+      })
+      .withFailureHandler(err => {
+        setLoading(false);
+        showStatus(`Server error during save: ${err.message}`, true);
+      })
+      .saveMultipleExpenses(expenseDataArray);
+}
+
+
+  function cancelMultiExpense() {
+    document.getElementById('multiExpenseConfirmArea').style.display = 'none';
+    document.getElementById('multiExpenseConfirmTableBody').innerHTML = '';
+  }
+
+    /**
+     * Handles the "Use" button click from the email results table. This is the main integration point.
+     * @param {HTMLElement} button - The button element that was clicked.
+     */
+  
+   function handleEmailSelection(button, threadId) {
+    _currentEmailSource.threadId = threadId; // Track the source for labeling
+
+    const modalInstance = M.Modal.getInstance(document.getElementById('emailResultsModal'));
+    modalInstance.close();
+
+    setLoading(true);
+    showStatus('AI is processing the selected email...', false);
+
+    // Call the server with just the threadId.
+    // The second parameter (attachmentName) is null because the server will auto-detect it.
+    google.script.run
+      .withSuccessHandler(response => {
+        setLoading(false);
+        if (response.error) {
+          showStatus('AI Processing Error: ' + response.error, true);
+        } else {
+          showStatus('AI processing complete. Please review and confirm.', false);
+          populateSummaryForm(response);
+          document.getElementById('expenseSummaryArea').style.display = 'block';
+        }
+      })
+      .withFailureHandler(handleEmailServerError)
+      .processSingleEmailForMulti(threadId, null); 
+  }
+
+  /**
+   * Filters the email results table based on user input.
+   */
+  function filterEmailTable() {
+    const filter = document.getElementById('emailSearchFilter').value.toUpperCase();
+    const table = document.getElementById("emailResultsTable");
+    const trs = table.getElementsByTagName("tr");
+
+    for (let i = 0; i < trs.length; i++) {
+      const row = trs[i];
+      if (row.parentNode.tagName.toLowerCase() !== 'tbody') continue;
+      if ((row.textContent || row.innerText).toUpperCase().indexOf(filter) > -1) {
+        row.style.display = "";
+      } else {
+        row.style.display = "none";
+      }
+    }
+  }
+
+  function handleEmailServerError(error) {
+    console.log(error);
+    setLoading(false);
+    document.getElementById('emailLoader').style.display = 'none';
+    console.error('Email Feature Error:', error);
+    M.toast({ html: `Error: ${error.message}`, classes: 'red darken-2 rounded', displayLength: 6000 });
+  }
+
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return str.toString()
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/\$\{/g, '&#36;{');
+  }
+  
+
+  function escapeJsString(str) {
+    if (str === null || str === undefined) {
+      return '';
+    }
+    return str.toString()
+      .replace(/\\/g, '\\\\')   // Escape backslashes
+      .replace(/'/g, "\\'")     // Escape single quotes
+      .replace(/"/g, '\\"')     // Escape double quotes
+      .replace(/\n/g, '\\n')    // Escape newlines
+      .replace(/\r/g, '\\r');   // Escape carriage returns
+  }
+
+  function toggleReminderFields(show) {
+    document.getElementById('reminderFields').style.display = show ? 'grid' : 'none';
+  }
+
+function openUserProfileModal() {
+  const modalInstance = M.Modal.getInstance(document.getElementById('userProfileModal'));
+  modalInstance.open();
+
+  const loader = document.getElementById('userProfileLoader');
+  const content = document.getElementById('userProfileContent');
+  loader.style.display = 'block';
+  content.style.display = 'none';
+
+  const populateStatsUI = (stats) => {
+    document.getElementById('statsThisMonthEntries').textContent = stats.N_thisMonth;
+    document.getElementById('statsThisMonthAmount').textContent = `${CURRENCY_SYMBOL}${formatAmount(stats.Amt_thisMonth)}`;
+    document.getElementById('statsTotalEntries').textContent = stats.N_total;
+    document.getElementById('statsTotalAmount').textContent = `${CURRENCY_SYMBOL}${formatAmount(stats.Amt_total)}`;
+    document.getElementById('statsFirstEntry').textContent = stats.firstEntryDate || 'N/A';
+    document.getElementById('statsLastEntry').textContent = stats.lastEntryDate || 'N/A';
+  };
+
+  // --- NEW CACHE-FIRST LOGIC ---
+  if (currentUserStats.isLoaded) {
+    // FAST PATH: Stats are already cached. Just fetch the static master lists.
+    console.log("Profile Modal: Loading stats from client-side cache.");
+    populateStatsUI(currentUserStats); // Instantly populate stats
+    
+    google.script.run
+      .withSuccessHandler(staticProfileData => {
+        if (staticProfileData.error) { 
+          showStatus('Error loading profile masters: ' + staticProfileData.error, true);
+          loader.style.display = 'none';
+          return; 
+        }
+        populateUserProfile(staticProfileData); // This populates the non-stats part
+        loader.style.display = 'none';
+        content.style.display = 'block';
+        M.Collapsible.init(document.getElementById('mastersAccordion'));
+        M.Tooltip.init(document.querySelectorAll('#userProfileModal .tooltipped'));
+      })
+      .withFailureHandler(err => { 
+        loader.style.display = 'none';
+        showStatus('Failed to load profile masters: ' + err.message, true);
+      })
+      .getInitialProfileData(); // This is the FAST server call
+
+  } else {
+    //(FIRST TIME ONLY): Fetch everything from the server.
+    console.log("Profile Modal: First load, fetching all data from server.");
+    google.script.run
+      .withSuccessHandler(fullProfileData => {
+        if (fullProfileData.error) { 
+          showStatus('Error loading full profile: ' + fullProfileData.error, true);
+          loader.style.display = 'none';
+          return; 
+        }
+        
+        currentUserStats = { ...fullProfileData.stats, isLoaded: true }; // Cache the stats
+        
+        populateStatsUI(fullProfileData.stats);
+        populateUserProfile(fullProfileData);
+        
+        loader.style.display = 'none';
+        content.style.display = 'block';
+        M.Collapsible.init(document.getElementById('mastersAccordion'));
+        M.Tooltip.init(document.querySelectorAll('#userProfileModal .tooltipped'));
+      })
+      .withFailureHandler(err => {
+        loader.style.display = 'none';
+        showStatus('Failed to load full profile: ' + err.message, true);
+      })
+      .getUserProfileData(); // server call
+  }
+}
+
+  function populateUserProfile(data) {
+    document.getElementById('userName').textContent = data.userName;
+    document.getElementById('userEmail').textContent = data.userEmail;
+
+    if (data.apiKeyInUse) {
+        const apiKeyEl = document.getElementById('userApiKey');
+        const keyText = data.apiKeyInUse.isUserSpecific 
+            ? `User-Specific (********${data.apiKeyInUse.key.slice(-4)})` 
+            : `App Default`;
+        apiKeyEl.textContent = `${keyText} - ${data.apiKeyInUse.platform}`;
+        apiKeyEl.setAttribute('data-tooltip', `Extraction: ${data.apiKeyInUse.extractionModel} | Q&A: ${data.apiKeyInUse.qaModel}`);
+    }
+    
+    document.getElementById('userApiKeyPurpose').textContent = data.apiKeyInUse.purpose;
+    
+    const accordion = document.getElementById('mastersAccordion');
+    accordion.innerHTML = '';
+    if (data.masters) {
+      Object.keys(data.masters).forEach(masterName => {
+          const records = data.masters[masterName];
+          const li = document.createElement('li');
+          let bodyHtml;
+
+          if (masterName === "Category Mappings") {
+              bodyHtml = `
+                  <ul class="collection">
+                      ${records.map((record, index) => `
+                          <li class="collection-item" id="cat-mapping-${index}">
+                              <div class="cat-display">
+                                  <strong>${escapeHtml(record.primary)}</strong>
+                                  <a onclick="editCategoryMapping(${index}, '${escapeJsString(record.primary)}', '${escapeJsString(record.subs)}')" class="secondary-content tooltipped" data-tooltip="Edit">
+                                      <i class="material-icons">edit</i>
+                                  </a>
+                                  <p style="margin: 5px 0 0 10px; color: var(--text-light);">${escapeHtml(record.subs)}</p>
+                              </div>
+                              <div class="cat-edit" style="display:none;"></div>
+                          </li>`).join('')}
+                  </ul>`;
+          } else {
+              // ... (rest of the function for other masters remains the same)
+              bodyHtml = `
+                  <div class="collection-header">
+                      <button class="btn-small waves-effect waves-light" onclick="addNewMasterItem('${masterName}')">
+                          <i class="material-icons left">add</i>Add New
+                      </button>
+                  </div>
+                  <ul class="collection">
+                      ${records.map(record => `
+                          <li class="collection-item">
+                              <div>${escapeHtml(record)}
+                                  <a onclick="editMasterItem('${masterName}', '${escapeJsString(record)}')" class="secondary-content tooltipped" data-tooltip="Edit">
+                                      <i class="material-icons">edit</i>
+                                  </a>
+                              </div>
+                          </li>`).join('')}
+                  </ul>`;
+          }
+
+          li.innerHTML = `
+              <div class="collapsible-header"><i class="material-icons">list</i>${masterName} (${records.length} items)</div>
+              <div class="collapsible-body">${bodyHtml}</div>`;
+          accordion.appendChild(li);
+      });
+    }
+  }
+
+  function editCategoryMapping(index, primary, subs) {
+    const item = document.getElementById(`cat-mapping-${index}`);
+    const displayDiv = item.querySelector('.cat-display');
+    const editDiv = item.querySelector('.cat-edit');
+
+    displayDiv.style.display = 'none';
+    editDiv.innerHTML = `
+      <div class="input-field">
+        <input id="edit-primary-${index}" type="text" value="${escapeHtml(primary)}">
+        <label class="active" for="edit-primary-${index}">Primary Category</label>
+      </div>
+      <div class="input-field">
+        <textarea id="edit-subs-${index}" class="materialize-textarea">${escapeHtml(subs)}</textarea>
+        <label class="active" for="edit-subs-${index}">Subcategories (comma-separated)</label>
+      </div>
+      <button class="btn-small waves-effect waves-light green" onclick="saveCategoryMapping(${index}, '${escapeJsString(primary)}')">Save</button>
+      <button class="btn-small waves-effect waves-light grey" onclick="cancelCategoryEdit(${index})">Cancel</button>
+    `;
+    editDiv.style.display = 'block';
+    M.textareaAutoResize(document.getElementById(`edit-subs-${index}`));
+  }
+
+  function cancelCategoryEdit(index) {
+    const item = document.getElementById(`cat-mapping-${index}`);
+    item.querySelector('.cat-display').style.display = 'block';
+    item.querySelector('.cat-edit').style.display = 'none';
+  }
+
+  function saveCategoryMapping(index, originalPrimary) {
+    const newPrimary = document.getElementById(`edit-primary-${index}`).value.trim();
+    const newSubs = document.getElementById(`edit-subs-${index}`).value.trim();
+
+    if (!newPrimary) {
+      M.toast({html: 'Primary Category cannot be empty.', classes: 'red rounded'});
+      return;
+    }
+
+    setLoading(true);
+    google.script.run
+      .withSuccessHandler(response => {
+        setLoading(false);
+        if (response.success) {
+          showStatus('Category updated! Reloading profile...', false);
+          openUserProfileModal(); // Reload the modal to show changes
+        } else {
+          showStatus('Error updating category: ' + response.error, true);
+        }
+      })
+      .withFailureHandler(err => {
+        setLoading(false);
+        showStatus('Server error: ' + err.message, true);
+      })
+      .updateCategoryMapping(originalPrimary, newPrimary, newSubs);
+  }
+  function editMasterItem(masterName, originalValue) {
+      const newValue = prompt(`Editing "${originalValue}" from "${masterName}":`, originalValue);
+      if (newValue && newValue.trim() !== '' && newValue !== originalValue) {
+          setLoading(true);
+          google.script.run
+              .withSuccessHandler(response => {
+                  setLoading(false);
+                  if (response.success) {
+                      showStatus('Master list updated! The app will now reload to apply changes.', false);
+                      // Reload the profile modal to show changes
+                      setTimeout(() => location.reload(), 2000);
+                  } else {
+                      showStatus('Error updating master: ' + response.error, true);
+                  }
+              })
+              .withFailureHandler(err => {
+                  setLoading(false);
+                  showStatus('Server error: ' + err.message, true);
+              })
+              .updateMasterItem(masterName, originalValue, newValue);
+      }
+  }
+
+  function addNewMasterItem(masterName) {
+    const newValue = prompt(`Add a new item to "${masterName}":`);
+    if (newValue && newValue.trim() !== '') {
+        // Show a temporary loader inside the modal for better UX
+        const loader = document.getElementById('userProfileLoader');
+        loader.style.display = 'block';
+
+        google.script.run
+            .withSuccessHandler(response => {
+                if (response.success) {
+                    // Show a success toast message
+                    M.toast({html: `Successfully added "${newValue.trim()}"!`, classes: 'green rounded'});
+                    
+                    // IMPORTANT: Instead of reloading the whole page,
+                    // just re-run the function that populates the modal.
+                    // This is much faster and keeps the user's context.
+                    openUserProfileModal(); 
+                } else {
+                    loader.style.display = 'none'; // Hide loader on failure
+                    showStatus('Error adding item: ' + response.error, true);
+                }
+            })
+            .withFailureHandler(err => {
+                loader.style.display = 'none'; // Hide loader on failure
+                showStatus('Server error: ' + err.message, true);
+            })
+            .addMasterRecord(masterName, newValue.trim());
+    }
+  }
+
+  function findFallbackOption(tsInstance) {
+    if (!tsInstance || !tsInstance.options) return null;
+
+    const options = Object.values(tsInstance.options);
+    const searchPriority = ['cash', 'others', 'other'];
+
+    for (const term of searchPriority) {
+      const foundOption = options.find(opt => opt.text.toLowerCase().includes(term));
+      if (foundOption) {
+        return foundOption.value;
+      }
+    }
+    return null;
+  }
+
+  function setTomSelectValue(elementId, value, text = null) {
+  const tsInstance = tomSelectInstances[elementId];
+  if (!tsInstance) {
+    console.error(`TomSelect instance for #${elementId} not found.`);
+    return;
+  }
+
+  tsInstance.sync();
+
+  if (!value) {
+    tsInstance.clear(true);
+    return;
+  }
+
+  const options = Object.values(tsInstance.options);
+  const lowerCaseValue = value.toLowerCase();
+
+  // Strategy 1: Exact match (fastest)
+  let foundOption = options.find(opt => opt.value === value);
+  if (foundOption) {
+    tsInstance.setValue(foundOption.value, true);
+    return;
+  }
+
+  // Strategy 2: Case-insensitive match
+  foundOption = options.find(opt => opt.text.toLowerCase() === lowerCaseValue);
+  if (foundOption) {
+    tsInstance.setValue(foundOption.value, true);
+    return;
+  }
+  
+  // Strategy 3: Partial match (e.g., AI says "7-Eleven", option is "7-11")
+  foundOption = options.find(opt => opt.text.toLowerCase().includes(lowerCaseValue) || lowerCaseValue.includes(opt.text.toLowerCase()));
+  if (foundOption) {
+    tsInstance.setValue(foundOption.value, true);
+    return;
+  }
+
+  // Strategy 4: Create the option if allowed
+  if (tsInstance.settings.create) {
+    const newOptionText = text || value;
+    tsInstance.addOption({ value: value, text: newOptionText });
+    tsInstance.setValue(value, true);
+    return;
+  }
+
+  // Strategy 5: Generic "Other(s)" fallback
+  const otherOption = options.find(opt => opt.text.toLowerCase().includes('other'));
+  if (otherOption) {
+    tsInstance.setValue(otherOption.value, true);
+    console.log(`TomSelect #${elementId}: Could not set "${value}", used fallback "${otherOption.text}".`);
+    return;
+  }
+
+  // Final fallback: Clear and warn
+  tsInstance.clear(true);
+  console.warn(`TomSelect #${elementId}: Value "${value}" not found, no fallback available. Selection cleared.`);
+}
+
+  function getFinancialAdviceUI() {
+    setLoading(true);
+    clear_and_hide();
+    showStatus("Asking Fin for some financial advice...", false);
+
+    google.script.run
+        .withSuccessHandler(response => {
+            setLoading(false);
+            // The server now returns a consistent object with a summary,
+            // so showAIAnswer will handle it perfectly.
+            showAIAnswer(response);
+        })
+        .withFailureHandler(error => {
+            setLoading(false);
+            showStatus('Server communication error: ' + error.message, true);
+        })
+        .getFinancialAdvice();
+  }
+
+  function shareApp() {
+      const copyUrl = 'https:\/\/docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/copy';
+      const shareData = {
+          title: 'AI Expense Tracker Template',
+          text: 'Here is the Google Sheet template for the AI Expense Tracker. Make a copy to set it up for yourself!',
+          url: copyUrl
+      };
+      if (navigator.share) {
+        navigator.share(shareData)
+            .then(() => console.log('App shared successfully!'))
+            .catch(err => console.error("Share failed:", err));
+      } else {
+        // Fallback for desktop browsers: show a prompt to the user
+        prompt("Copy this link to share the template:", shareData.url);
+      }
+  }
+
+
+</script>
+
