@@ -1430,32 +1430,15 @@ function answerQuestionAgentic(question = 'List all of my chocolate and bread ex
 
 function translateToEnglishIfNeeded(text) {
   if (!text || typeof text !== 'string' || text.trim() === '') {
-    return ''; // Return empty for invalid input
+    return '';
   }
-
   try {
-    // 1. Detect the language of the input text
-    const detectedLanguage = LanguageApp.detectLanguage(text);
-
-    // 2. If it's not English, translate it. Otherwise, return the original.
-    if (detectedLanguage && detectedLanguage !== 'en') {
-      Logger.log(`Detected language: '${detectedLanguage}'. Translating to English...`);
-      // Use a nested try-catch for the translation itself
-      try {
-        const translatedText = LanguageApp.translate(text, detectedLanguage, 'en');
-        Logger.log(`Original: "${text}" -> Translated: "${translatedText}"`);
-        return translatedText;
-      } catch (translateError) {
-        Logger.log(`Warning: Translation from '${detectedLanguage}' to 'en' failed. Falling back to original text. Error: ${translateError.message}`);
-        return text; // Fallback on translation failure
-      }
-    } else {
-      // It's already English or language could not be determined, no need to translate.
-      return text;
-    }
-  } catch (detectError) {
-    Logger.log(`Warning: Language detection failed. Using original text. Error: ${detectError.message}`);
-    return text; // Fallback on detection failure
+    // Use empty string for source language to trigger auto-detection
+    const translatedText = LanguageApp.translate(text, '', 'en');
+    return translatedText;
+  } catch (e) {
+    Logger.log(`Warning: Translation failed. Using original text. Error: ${e.message}`);
+    return text; 
   }
 }
 
@@ -1546,7 +1529,6 @@ function processSimpleQueryDirectly(question, queryType) {
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     
-    // Default filter parameters
     let filterParams = {
         userEmail: userDetails.email,
         costCenter: userDetails.userCostCenter,
@@ -1554,37 +1536,46 @@ function processSimpleQueryDirectly(question, queryType) {
         endDate: new Date().toISOString().slice(0, 10)
     };
     
-    // Apply context-aware filters based on the query
     const normalized = question.toLowerCase();
-    
-    // Month detection
+    const helperData = getHelperListsData(); // Load once
+
+    // 1. Month detection (Existing logic)
     const monthNames = ["january", "february", "march", "april", "may", "june", 
                         "july", "august", "september", "october", "november", "december"];
     const currentYear = new Date().getFullYear();
-    const currentMonth = new Date().getMonth();
     
     for (let i = 0; i < monthNames.length; i++) {
         if (normalized.includes(monthNames[i])) {
             const monthIndex = i;
             filterParams.startDate = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-01`;
-            // Get last day of month
             const lastDay = new Date(currentYear, monthIndex + 1, 0).getDate();
             filterParams.endDate = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-${lastDay}`;
             break;
         }
     }
     
-    // Category detection
-    const categories = getHelperListsData().primaryCategories || [];
+    // 2. Primary Category detection (Existing logic)
+    const categories = helperData.primaryCategories || [];
     for (const category of categories) {
         if (normalized.includes(category.toLowerCase())) {
             filterParams.primaryCategory = category;
             break;
         }
     }
+
+    // 3. NEW: Subcategory detection (Fixes "Bread")
+    if (!filterParams.primaryCategory) {
+        const subcats = helperData.allUniqueSubcategories || [];
+        for (const subcat of subcats) {
+            if (normalized.includes(subcat.toLowerCase())) {
+                filterParams.subcategory = subcat;
+                break;
+            }
+        }
+    }
     
-    // Vendor detection
-    const vendors = getHelperListsData().vendors || [];
+    // 4. Vendor detection (Existing logic)
+    const vendors = helperData.vendors || [];
     for (const vendor of vendors) {
         if (normalized.includes(vendor.toLowerCase())) {
             filterParams.vendor = vendor;
@@ -1592,48 +1583,46 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // Amount filters
+    // 5. Amount filters (Existing logic)
     const amountMatches = normalized.match(/(?:over|above|more than|greater than|exceeds) (\d+(?:\.\d+)?)/i);
     if (amountMatches && amountMatches[1]) {
         filterParams.minAmount = parseFloat(amountMatches[1]);
+    }
+
+    // 6. Text Search Fallback
+    // If we didn't match a specific category/vendor, assume the user is searching for text.
+    if (!filterParams.primaryCategory && !filterParams.subcategory && !filterParams.vendor) {
+        // Remove common "stop words" to find the core search term
+        const cleanQuery = normalized
+            .replace(/^(show|list|find|get|me|my|our|all|expenses?|purchases?)\b/gi, '')
+            .replace(/\b(expenses?|purchases?)\b/gi, '') // Remove trailing words
+            .trim();
+        
+        if (cleanQuery.length > 0) {
+            filterParams.textSearch = cleanQuery;
+        }
     }
     
     // Get the data
     const expenseData = getExpenseDataForAI(filterParams);
     
     if (expenseData.error) {
-        return {
-            type: 'error',
-            summary: 'Error retrieving expense data',
-            content: expenseData.error
-        };
+        return { type: 'error', summary: 'Error retrieving expense data', content: expenseData.error };
     }
     
     if (expenseData.count === 0) {
         return {
             type: 'text',
             summary: 'No matching expenses found',
-            content: `I couldn't find any expenses matching your criteria for "${question}". Try adjusting your search terms or date range.`
+            content: `I couldn't find any expenses matching "${question}". Try adjusting your search terms.`
         };
     }
     
-    // Format the simple response
-    let summaryText = '';
-    if (filterParams.primaryCategory) {
-        summaryText = `Here are your ${filterParams.primaryCategory} expenses`;
-    } else if (filterParams.vendor) {
-        summaryText = `Here are your expenses at ${filterParams.vendor}`;
-    } else if (filterParams.startDate && filterParams.endDate) {
-        const startDate = new Date(filterParams.startDate);
-        const endDate = new Date(filterParams.endDate);
-        if (startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear()) {
-            summaryText = `Here are your expenses for ${monthNames[startDate.getMonth()]} ${startDate.getFullYear()}`;
-        } else {
-            summaryText = `Here are your expenses from ${filterParams.startDate} to ${filterParams.endDate}`;
-        }
-    } else {
-        summaryText = `Here are your recent expenses`;
-    }
+    // Format the response
+    let summaryText = `Here are your expenses matching "${question}"`;
+    if (filterParams.primaryCategory) summaryText = `Here are your ${filterParams.primaryCategory} expenses`;
+    else if (filterParams.subcategory) summaryText = `Here are your ${filterParams.subcategory} expenses`; // Added
+    else if (filterParams.vendor) summaryText = `Here are your expenses at ${filterParams.vendor}`;
     
     return {
         type: 'table',
