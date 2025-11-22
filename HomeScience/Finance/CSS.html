@@ -1,0 +1,1188 @@
+<style>
+/* ======================================================= */
+/* --- THEME & GLOBAL VARIABLES -------------------------- */
+/* ======================================================= */
+:root {
+  /* Default Light Theme */
+  --bg-main: #f7f9fc;
+  --bg-card: #ffffff;
+  --bg-card-alt: #f1f3f6;
+  --text: #212121;
+  --text-light: #5f6368;
+  --border: #dee2e6;
+  --primary: #4caf50;
+  --secondary: #ff9800;
+  --accent: #2196f3;
+  --error: #d32f2f;
+  --error-bg: #fdecea;
+  --error-border: #f7c5c5;
+}
+
+:root[data-theme="dark"] {
+  --bg-main: #121212;
+  --bg-card: #1e1e1e;
+  --bg-card-alt: #2a2a2a;
+  --text: #e0e0e0;
+  --text-light: #bdbdbd;
+  --border: #424242;
+  --accent: #448aff;
+  --error: #ef5350;
+  --error-bg: #3e2723;
+}
+
+:root[data-theme="blue"] {
+  --bg-main: #e3f2fd;
+  --bg-card: #ffffff;
+  --bg-card-alt: #bbdefb;
+  --text: #0d47a1;
+  --text-light: #1976d2;
+  --border: #90caf9;
+  --accent: #1e88e5;
+}
+
+:root[data-theme="green"] {
+  --bg-main: #e8f5e9;
+  --bg-card: #ffffff;
+  --bg-card-alt: #c8e6c9;
+  --text: #1b5e20;
+  --text-light: #388e3c;
+  --border: #a5d6a7;
+  --primary: #4caf50;
+  --secondary: #ffc107;
+  --accent: #03a9f4;
+}
+
+:root[data-theme="orange"] {
+  --bg-main: #fff3e0;
+  --bg-card: #ffffff;
+  --bg-card-alt: #ffe0b2;
+  --text: #e65100;
+  --text-light: #f57c00;
+  --border: #ffcc80;
+  --primary: #ff9800;
+  --secondary: #4caf50;
+  --accent: #2196f3;
+}
+
+/* ======================================================= */
+/* --- BASE STYLES & LAYOUT ------------------------------ */
+/* ======================================================= */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--bg-main);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+html, body {
+  overflow-x: hidden;
+}
+
+.container {
+  flex: 1 0 auto;
+  width: 95%;
+  max-width: 1000px;
+  margin: 20px auto;
+}
+
+.card-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  padding: clamp(20px, 4vw, 30px);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.card-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 3s linear infinite;
+  opacity: 0.7;
+}
+
+@keyframes shimmer {
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.row.equal-height-cards {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.row.equal-height-cards > .col {
+  display: flex;
+  flex-direction: column;
+}
+
+.row.equal-height-cards > .col > .card-panel {
+  flex-grow: 1;
+}
+
+/* ======================================================= */
+/* --- FORMS & INPUTS ------------------------------------ */
+/* ======================================================= */
+.form-group {
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-light);
+  margin-bottom: 0.5rem;
+}
+
+.form-input,
+.form-textarea,
+input[type="text"],
+input[type="date"],
+input[type="number"],
+.ts-control,
+.ts-wrapper.single .ts-control,
+.ts-wrapper.single .ts-control.input-active {
+  background-color: var(--bg-card) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  width: 100% !important;
+}
+
+.ts-dropdown {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+  z-index: 10000 !important;
+}
+
+.ts-dropdown .option,
+.ts-item {
+  color: var(--text) !important;
+}
+
+.ts-dropdown .option:hover,
+.ts-dropdown .active {
+  background-color: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+
+:is(.form-input, .form-textarea, input[type="text"], input[type="date"], input[type="number"]):focus-visible,
+.ts-control.focus {
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent) !important;
+}
+
+select:not(.browser-default) {
+  display: none !important;
+}
+
+#expDescription {
+  min-height: 120px;
+  resize: vertical;
+  transition: height 0.2s ease-in-out;
+}
+
+#userInput {
+  width: 100%;
+  min-height: 120px;
+  padding: 16px 20px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  resize: vertical;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  line-height: 1.5;
+}
+
+#userInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+#inputArea .form-group .form-label {
+  position: absolute;
+  top: -12px;
+  left: 16px;
+  background: var(--bg-card);
+  padding: 0 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.025em;
+  z-index: 1;
+  border-radius: 4px;
+}
+
+.form-group .error-message {
+  color: var(--error);
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-top: 4px;
+  display: none;
+  animation: pulse-error 0.5s ease-in-out;
+}
+
+@keyframes pulse-error {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.form-group .error-message.show {
+  display: block;
+}
+
+.form-group .error,
+.form-group .ts-control.error,
+.error,
+.ts-control.error {
+  border: 2px solid var(--error) !important;
+  background-color: var(--error-bg) !important;
+}
+
+/* ======================================================= */
+/* --- BUTTONS & ACTIONS --------------------------------- */
+/* ======================================================= */
+.action-buttons {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn,
+.btn-floating {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-submit,
+.btn-reset {
+  border: none;
+  padding: 12px 30px;
+  border-radius: 25px;
+  color: white;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+}
+
+.btn-submit {
+  background: linear-gradient(45deg, #4caf50, #66bb6a);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.btn-reset {
+  background: linear-gradient(45deg, #757575, #9e9e9e);
+  box-shadow: 0 4px 12px rgba(117, 117, 117, 0.3);
+}
+
+.btn-submit:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
+}
+
+.btn-reset:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(117, 117, 117, 0.4);
+}
+
+/* ======================================================= */
+/* --- AI RESPONSE AREA ---------------------------------- */
+/* ======================================================= */
+#aiAnswerArea {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 5%, var(--bg-card)),
+    color-mix(in srgb, var(--primary) 5%, var(--bg-card))
+  );
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 1.5rem;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.05);
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+#aiAnswerArea h6 {
+  margin: 0 0 1rem 0;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+#aiAnswerArea .scrollable-table-container {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+#aiAnswerArea .modal-content {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+#aiAnswerContent {
+  color: var(--text-light);
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+#aiAnswerContent canvas {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.agent-status-message {
+  font-style: italic;
+  color: var(--text-light);
+  padding: 1rem;
+  background-color: var(--bg-card-alt);
+  border-radius: 8px;
+  border-left: 4px solid var(--accent);
+}
+
+.agent-details-box {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.ai-table-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-stats {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--text-light);
+}
+
+.table-stats strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ai-table-search {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  width: 100%;
+  max-width: 280px;
+  background-color: var(--bg-card);
+  color: var(--text);
+}
+
+.ai-table-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.copy-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.copy-btn:hover {
+  background-color: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.copy-btn i {
+  color: var(--text-light);
+  font-size: 18px;
+}
+
+/* ======================================================= */
+/* --- RESPONSIVE TABLE STYLES (HORIZONTAL SCROLL) ------- */
+/* ======================================================= */
+
+/* Ensure scroll container handles overflow */
+#aiAnswerContent > div[style*="overflow-x: auto"],
+#expenseTableContainer,
+.scrollable-table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch; /* Smooth iOS scrolling */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Base table styling */
+.scrollable-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Headers */
+.scrollable-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text);
+  background-color: var(--bg-card-alt, #f5f5f5);
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+
+/* Data cells */
+.scrollable-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inner wrapper for clean wrapping control */
+.scrollable-table td .td-content {
+  display: block;
+  white-space: inherit;
+  text-align: left;
+}
+
+/* Remove last row border */
+.scrollable-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Alignment utilities */
+.scrollable-table .align-right {
+  text-align: right !important;
+}
+.scrollable-table .align-right .td-content {
+  text-align: right !important;
+}
+
+/* Column width control */
+.scrollable-table .col-description {
+  min-width: 300px;
+  max-width: 500px;
+  white-space: normal !important;
+  word-break: break-word;
+}
+.scrollable-table .col-description .td-content {
+  white-space: normal !important;
+  word-break: break-word;
+}
+
+.scrollable-table .col-compact {
+  min-width: 120px;
+  max-width: 180px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.scrollable-table .col-subcategory,
+.scrollable-table th:nth-child(4),
+.scrollable-table td:nth-child(4) {
+  min-width: 180px;
+  white-space: normal !important;
+  word-break: break-word;
+}
+.scrollable-table .col-subcategory .td-content {
+  white-space: normal !important;
+  word-break: break-word;
+}
+
+/* Vendor column should not collapse */
+.scrollable-table th:nth-child(5),
+.scrollable-table td:nth-child(5) {
+  white-space: normal !important;
+  min-width: 150px;
+  word-break: break-word;
+}
+
+/* Horizontal scroll bar styling */
+.scrollable-table-container::-webkit-scrollbar {
+  height: 6px;
+}
+.scrollable-table-container::-webkit-scrollbar-thumb {
+  background-color: rgba(150, 150, 150, 0.4);
+  border-radius: 3px;
+}
+/* ======================================================= */
+/* --- MODALS & POPUPS ----------------------------------- */
+/* ======================================================= */
+.modal {
+  background-color: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  max-height: 90vh;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal.open {
+  display: flex !important;
+}
+
+.modal .modal-content {
+  padding: 24px 32px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.modal .modal-footer {
+  padding: 16px 32px;
+  background-color: var(--bg-card-alt);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1rem;
+}
+
+.modal-overlay {
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  backdrop-filter: blur(4px);
+}
+
+.modal h4 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1.8rem;
+  font-weight: 600;
+  text-align: center;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--border);
+}
+
+.modal.responsive-modal {
+  width: 95vw !important;
+  max-width: 1400px !important;
+  height: auto !important;
+  max-height: 90vh !important;
+}
+
+#dateSelectionModal {
+  width: 90vw !important;
+  max-width: 700px !important;
+  height: auto !important;
+  max-height: 80vh !important;
+}
+
+#dateSelectionModal .modal-content {
+  display: block;
+  padding: 30px;
+}
+
+#dateSelectionModal .row {
+  width: 100%;
+  max-width: 400px;
+  margin: auto;
+}
+
+#dateSelectionModal .input-field {
+  position: relative;
+  margin-top: 1.5rem;
+}
+
+#dateSelectionModal .input-field label {
+  position: absolute;
+  top: -25px;
+  left: 0;
+  background: var(--bg-card);
+  padding: 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent);
+  z-index: 1;
+  border-radius: 4px;
+}
+
+#dateSelectionModal .ts-control {
+  border-width: 2px !important;
+  border-radius: 12px !important;
+  padding: 16px 20px !important;
+  font-size: 1.1rem !important;
+  min-height: 56px !important;
+}
+
+#customDateRange {
+  display: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: center;
+  margin-top: 2.5rem;
+}
+
+#customDateRange.show {
+  display: grid !important;
+}
+
+#customDateRange .input-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+#customDateRange .input-field label {
+  position: static;
+  transform: none;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+#customDateRange .input-field .datepicker {
+  width: 100% !important;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 12px 16px !important;
+  font-size: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.ask-ai-modal {
+  width: 90% !important;
+  max-width: 700px !important;
+  border-radius: 16px;
+  height: auto !important;
+}
+
+.ask-ai-modal .modal-content {
+  padding: 32px;
+}
+
+.ask-ai-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.ask-ai-option-card {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background-color: var(--bg-card-alt);
+}
+
+.ask-ai-option-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-color: var(--accent);
+}
+
+.ask-ai-option-card i {
+  font-size: 48px;
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+
+.ask-ai-option-card h5 {
+  margin: 0 0 8px 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ask-ai-option-card p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-light);
+  line-height: 1.5;
+}
+
+/* ======================================================= */
+/* --- UTILITY & MISC STYLES ----------------------------- */
+/* ======================================================= */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #aaa;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #888;
+}
+
+.truncate-cell {
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+  font-size: 0.95rem;
+}
+
+.summary-table th,
+.summary-table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.status-box {
+  text-align: center;
+  margin: 10px auto;
+  padding: 15px;
+  font-weight: 500;
+  border-radius: 8px;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: all 0.3s ease;
+}
+
+.status-box.success {
+  color: #155724;
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+}
+
+.status-box.error {
+  color: #721c24;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+}
+
+.celebration-popup {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 500px;
+  padding: 30px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  border-top: 4px solid var(--primary);
+  text-align: center;
+  z-index: 2000;
+  display: none;
+}
+
+.celebration-popup.show {
+  display: block !important;
+  animation: celebrationFadeIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.celebration-popup.hide {
+  animation: celebrationFadeOut 0.3s ease-in-out forwards;
+}
+
+@keyframes celebrationFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+}
+
+@keyframes celebrationFadeOut {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+
+.fixed-action-btn {
+  bottom: 24px;
+  right: 24px;
+  position: fixed;
+  z-index: 997;
+}
+
+#mainFabMenu > a.btn-floating {
+  background-image: linear-gradient(45deg, var(--secondary), color-mix(in srgb, var(--secondary) 70%, #ff5722));
+}
+
+.fixed-action-btn ul li.theme-switcher-li {
+  position: relative;
+}
+
+.theme-options-menu {
+  position: absolute;
+  right: 55px;
+  bottom: 5px;
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+  background-color: var(--bg-card);
+  border-radius: 50px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+  opacity: 0;
+  transform: translateX(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+  z-index: 998;
+}
+
+.fixed-action-btn ul li.theme-switcher-li:hover .theme-options-menu {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.theme-options-menu a {
+  width: 28px;
+  height: 28px;
+  display: block;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.theme-options-menu a:hover {
+  transform: scale(1.2);
+}
+
+/* ======================================================= */
+/* --- MEDIA QUERIES (ALL TOGETHER) ---------------------- */
+/* ======================================================= */
+
+
+/* Small tablets and below */
+@media screen and (max-width: 768px) {
+  /* General layout adjustments for smaller screens */
+  .container {
+    width: 100%;
+    padding: 10px;
+  }
+
+  .form-row,
+  #customDateRange.show {
+    grid-template-columns: 1fr;
+  }
+
+  /* Modal adjustments for smaller screens */
+  .modal.responsive-modal {
+    width: 98vw !important;
+    max-height: 95vh !important;
+  }
+
+  .modal .modal-content {
+    padding: 20px;
+  }
+
+  .modal h4 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .responsive-table td {
+    white-space: nowrap;
+    overflow: hidden;           /* Hides the overflowing text */
+    text-overflow: ellipsis;    /* Adds the "..." effect */
+  }
+  
+  /* Font size adjustment for tables on mobile for better readability */
+  #aiAnswerContent .responsive-table td,
+  .modal .responsive-table td {
+    font-size: 0.95rem;
+    line-height: 1.4;
+  }
+    
+  #aiAnswerContent .responsive-table th:nth-child(5) { width: 10%; text-align: left; }
+  #expenseDataTable th:nth-child(7) { width: 9%; text-align: left; }
+
+  .scrollable-table td {
+    white-space: normal !important; /* Allow wrapping */
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .scrollable-table td .td-content {
+    white-space: normal !important;
+    word-break: break-word;
+  }
+
+}
+
+/* Mobile phones - FINAL CORRECTED VERSION */
+@media screen and (max-width: 600px) {
+  /* Modal styling remains the same */
+  .modal.open {
+    display: flex !important;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+  .modal.open .modal-content {
+    flex-grow: 1;
+    overflow-y: auto;
+    height: 100%;
+  }
+  .modal.open .modal-footer {
+    flex-shrink: 0;
+  }
+  .modal .modal-footer {
+    padding: 10px;
+    height: auto;
+    display: block;
+    width: 100%;
+  }
+  .modal .modal-footer .btn,
+  .modal .modal-footer .btn-flat {
+    width: 100%;
+    margin-bottom: 8px;
+    text-align: center;
+  }
+  .modal .modal-footer .btn:last-child,
+  .modal .modal-footer .btn-flat:last-child {
+    margin-bottom: 0;
+  }
+  .modal .modal-footer .btn {
+    color: white !important;
+  }
+  .modal .modal-footer .btn-flat {
+    color: var(--accent) !important;
+  }
+  .ask-ai-options {
+    grid-template-columns: 1fr;
+  }
+
+  /* ─────────────────────────────────────────────── */
+  /* ✅ FINAL TABLE FIX: PROPER ALIGNMENT & MINIMAL HEADERS */
+  /* ─────────────────────────────────────────────── */
+
+  .scrollable-table {
+    display: table;
+    table-layout: auto !important; /* Let browser calculate widths */
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    min-width: 100%; /* Critical for horizontal scroll */
+  }
+
+  .scrollable-table thead {
+    display: table-header-group;
+  }
+
+  .scrollable-table tbody {
+    display: table-row-group;
+  }
+
+  .scrollable-table tr {
+    display: table-row;
+  }
+
+  /* Unified cell styling - most important part */
+  .scrollable-table th,
+  .scrollable-table td {
+    padding: 8px 8px !important;
+    vertical-align: top !important; /* Critical for alignment */
+    text-align: left !important;
+    white-space: normal !important; /* Allow wrapping everywhere */
+    word-break: break-word;
+    overflow-wrap: break-word;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.4;
+  }
+
+  /* Header specific styles */
+  .scrollable-table th {
+    font-weight: 600;
+    background-color: var(--bg-card-alt, #f5f5f5);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 6px 8px !important;
+    font-size: 0.8rem;
+    min-height: 36px;
+    max-height: 60px; /* Prevents headers from growing too tall */
+    overflow: hidden;
+  }
+
+  /* Ensure headers wrap to minimize width */
+  .scrollable-table th {
+    white-space: normal !important;
+    word-break: break-word;
+    overflow: hidden;
+  }
+
+  /* Remove any right-alignment */
+  .scrollable-table .align-right,
+  .scrollable-table .align-right .td-content {
+    text-align: left !important;
+  }
+
+  /* Inner content wrapper */
+  .scrollable-table td .td-content {
+    display: block;
+    white-space: inherit;
+    word-break: inherit;
+  }
+
+  /* Special column handling */
+  .scrollable-table .col-description {
+    min-width: 200px;
+    max-width: 300px;
+  }
+
+  .scrollable-table .col-compact {
+    min-width: 100px;
+    max-width: 150px;
+  }
+
+  /* Vendor column */
+  .scrollable-table th[data-column="vendor"],
+  .scrollable-table td[data-column="vendor"],
+  .scrollable-table th:nth-child(5),
+  .scrollable-table td:nth-child(5) {
+    min-width: 120px;
+  }
+
+  /* Subcategory column */
+  .scrollable-table th[data-column="subcategory"],
+  .scrollable-table td[data-column="subcategory"],
+  .scrollable-table th:nth-child(4),
+  .scrollable-table td:nth-child(4) {
+    min-width: 110px;
+  }
+
+  /* Amount column */
+  .scrollable-table th[data-column*="amount"],
+  .scrollable-table td[data-column*="amount"],
+  .scrollable-table th:nth-child(7),
+  .scrollable-table td:nth-child(7) {
+    min-width: 90px;
+  }
+
+  /* Container for horizontal scroll */
+  .scrollable-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 100%;
+  }
+
+  /* Hide scrollbar if needed */
+  .scrollable-table-container::-webkit-scrollbar {
+    height: 6px;
+  }
+  .scrollable-table-container::-webkit-scrollbar-thumb {
+    background-color: rgba(150, 150, 150, 0.4);
+    border-radius: 3px;
+  }
+}
+
+
+/* Very small screens */
+@media screen and (max-width: 480px) {
+  .modal.responsive-modal {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+  }
+
+  .modal .modal-content {
+    padding: 16px;
+  }
+
+  .modal .modal-footer {
+    padding: 12px;
+  }
+
+  .scrollable-table th,
+  .scrollable-table td {
+    font-size: 0.85rem;
+    padding: 6px 5px;
+  }
+  .scrollable-table .col-description {
+    min-width: 200px;
+  }
+}
+</style>
