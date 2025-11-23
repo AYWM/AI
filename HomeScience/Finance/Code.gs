@@ -1460,25 +1460,25 @@ function requiresHistoricalContext(question) {
 /**
  * Classifies query complexity to determine execution path
  */
+/**
+ * Classifies query complexity to determine execution path
+ */
 function classifyQueryComplexity(question) {
   // First, get the English version of the question
   const englishQuestion = translateToEnglishIfNeeded(question);
-
   // Normalize the translated question
   const normalized = englishQuestion.toLowerCase().trim();
-  
-  // Simple query patterns (these can now reliably work on the English text)
+
+  // Simple query patterns (Strict data retrieval only)
+  // We removed ambiguous patterns like "how much" to let the Agent handle them if needed
   const simplePatterns = [
       /list (?:my|our) expenses (?:for|in) (january|february|march|april|may|june|july|august|september|october|november|december)/i,
       /show (?:my|our) expenses (?:for|in) (january|february|march|april|may|june|july|august|september|october|november|december)/i,
-      /how much did i spend on (food|transportation|shopping|utilities|entertainment|housing)/i,
-      /total expenses for (january|february|march|april|may|june|july|august|september|october|november|december)/i,
-      /what did i spend on (?:groceries|food) (?:last|this) month/i,
-      /list expenses (?:from|for) ([a-z]+)(?:\s|$)/i,
-      /^show (?:me|us) (?:my|our) (?:recent|latest|last) (\d+)? expenses?$/i
+      // "How much did i spend on X" is usually a simple sum, but "How many times" is a count/analysis
+      /^total expenses for (january|february|march|april|may|june|july|august|september|october|november|december)/i,
   ];
   
-  // Complex query patterns
+  // Complex query patterns -> FORCE AGENTIC WORKFLOW
   const complexPatterns = [
       /(create|generate|make).*\b(report|pdf|document|summary)\b/i,
       /\b(chart|graph|visualization|breakdown)\b/i,
@@ -1486,26 +1486,33 @@ function classifyQueryComplexity(question) {
       /(reminder|alert|notify|notify me).*when/i,
       /compare.*spending.*between.*months/i,
       /analyze.*trends/i,
-      /forecast.*spending/i
+      /forecast.*spending/i,
+      
+      // --- NEW: Force Conversational/Analytical Queries to Agent ---
+      /how (many|often|frequently|much times)/i,  // Matches "How many times..."
+      /\bcount\b/i,                                // Matches "Count the..."
+      /have i (ever|once|before|bought)/i,         // Matches "Have I ever..."
+      /what (did|do) i (buy|spend)/i,              // Matches "What did I buy..."
+      /number of times/i
   ];
-  
-  // Check for simple patterns first
+
+  // Check for complex patterns FIRST
+  for (const pattern of complexPatterns) {
+      if (pattern.test(normalized)) {
+          return {
+              type: 'COMPLEX',
+              reason: 'Matches complex/conversational pattern',
+              pattern: pattern.toString()
+          };
+      }
+  }
+
+  // Check for explicit simple patterns
   for (const pattern of simplePatterns) {
       if (pattern.test(normalized)) {
           return {
               type: 'SIMPLE',
               reason: 'Matches simple data retrieval pattern',
-              pattern: pattern.toString()
-          };
-      }
-  }
-  
-  // Check for complex patterns
-  for (const pattern of complexPatterns) {
-      if (pattern.test(normalized)) {
-          return {
-              type: 'COMPLEX',
-              reason: 'Requires multi-step processing or document generation',
               pattern: pattern.toString()
           };
       }
