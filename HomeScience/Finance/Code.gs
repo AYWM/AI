@@ -1526,6 +1526,7 @@ function classifyQueryComplexity(question) {
  */
 function processSimpleQueryDirectly(question, queryType) {
     const userDetails = getUserDetails();
+    // ... (Date setup remains the same) ...
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     
@@ -1537,9 +1538,9 @@ function processSimpleQueryDirectly(question, queryType) {
     };
     
     const normalized = question.toLowerCase();
-    const helperData = getHelperListsData(); // Load once
+    const helperData = getHelperListsData(); 
 
-    // 1. Month detection (Existing logic)
+    // 1. Month detection
     const monthNames = ["january", "february", "march", "april", "may", "june", 
                         "july", "august", "september", "october", "november", "december"];
     const currentYear = new Date().getFullYear();
@@ -1554,7 +1555,7 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // 2. Primary Category detection (Existing logic)
+    // 2. Category & Vendor detection
     const categories = helperData.primaryCategories || [];
     for (const category of categories) {
         if (normalized.includes(category.toLowerCase())) {
@@ -1563,7 +1564,7 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
 
-    // 3. NEW: Subcategory detection (Fixes "Bread")
+    // 3. Subcategory detection
     if (!filterParams.primaryCategory) {
         const subcats = helperData.allUniqueSubcategories || [];
         for (const subcat of subcats) {
@@ -1574,7 +1575,6 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // 4. Vendor detection (Existing logic)
     const vendors = helperData.vendors || [];
     for (const vendor of vendors) {
         if (normalized.includes(vendor.toLowerCase())) {
@@ -1583,23 +1583,30 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // 5. Amount filters (Existing logic)
+    // 4. Amount filters
     const amountMatches = normalized.match(/(?:over|above|more than|greater than|exceeds) (\d+(?:\.\d+)?)/i);
     if (amountMatches && amountMatches[1]) {
         filterParams.minAmount = parseFloat(amountMatches[1]);
     }
 
-    // 6. Text Search Fallback
-    // If we didn't match a specific category/vendor, assume the user is searching for text.
+    // 5. FIXED TEXT SEARCH LOGIC
     if (!filterParams.primaryCategory && !filterParams.subcategory && !filterParams.vendor) {
-        // Remove common "stop words" to find the core search term
-        const cleanQuery = normalized
-            .replace(/^(show|list|find|get|me|my|our|all|expenses?|purchases?)\b/gi, '')
-            .replace(/\b(expenses?|purchases?)\b/gi, '') // Remove trailing words
-            .trim();
+        // List of words to SCRUB from the query
+        const fillerWords = [
+            "show", "list", "find", "get", "search", "fetch",
+            "me", "my", "our", "us", "all",
+            "expenses", "purchases", "spent", "bought", "transactions", "records",
+            "for", "in", "on", "at"
+        ];
+
+        // Create a global regex that matches any of these words as a whole word (\b)
+        const fillerRegex = new RegExp(`\\b(${fillerWords.join('|')})\\b`, 'gi');
+
+        // Remove filler words and clean up extra spaces
+        const cleanQuery = normalized.replace(fillerRegex, '').replace(/\s+/g, ' ').trim();
         
         if (cleanQuery.length > 0) {
-            filterParams.textSearch = cleanQuery;
+            filterParams.textSearch = cleanQuery; // Will now be just "bread"
         }
     }
     
@@ -1618,10 +1625,10 @@ function processSimpleQueryDirectly(question, queryType) {
         };
     }
     
-    // Format the response
-    let summaryText = `Here are your expenses matching "${question}"`;
+    // Format response
+    let summaryText = `Here are your expenses matching "${filterParams.textSearch || question}"`;
     if (filterParams.primaryCategory) summaryText = `Here are your ${filterParams.primaryCategory} expenses`;
-    else if (filterParams.subcategory) summaryText = `Here are your ${filterParams.subcategory} expenses`; // Added
+    else if (filterParams.subcategory) summaryText = `Here are your ${filterParams.subcategory} expenses`;
     else if (filterParams.vendor) summaryText = `Here are your expenses at ${filterParams.vendor}`;
     
     return {
@@ -2788,7 +2795,8 @@ function getExpenseDataForAI(filters) {
     
     // --- ALIAS & TEXT FILTERING (No changes here) ---
     if (filters.personSearch || filters.textSearch) {
-      const stopWords = new Set(['and', 'or', 'the', 'a', 'in', 'for', 'of', '&']);
+      // Update this line
+      const stopWords = new Set(['and', 'or', 'the', 'a', 'in', 'for', 'of', '&', 'me', 'my', 'all', 'show', 'list']);
       const initialTerms = (filters.personSearch || filters.textSearch).toLowerCase().split(/[\s,\|]+/).filter(term => term && !stopWords.has(term));
       const allSearchTerms = new Set();
       initialTerms.forEach(term => {
