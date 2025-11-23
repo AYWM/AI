@@ -1524,22 +1524,26 @@ function classifyQueryComplexity(question) {
 /**
  * Process simple queries directly without the full agent workflow
  */
+/**
+ * Optimized "Fast Track" query processor.
+ * Now handles "How many", "Have I ever", and "What did I spend" correctly.
+ */
 function processSimpleQueryDirectly(question, queryType) {
     const userDetails = getUserDetails();
     const normalized = question.toLowerCase();
     
-    // 1. INTELLIGENT DATE LOGIC
+    // --- 1. INTELLIGENT DATE LOGIC ---
     // Default: Last 90 days
     let startDate = new Date();
     startDate.setDate(startDate.getDate() - 90);
     let endDate = new Date();
     
-    // Check for "Forever" keywords
-    const foreverKeywords = /\b(ever|all time|history|total|entire)\b/i;
+    // Check for "Forever" keywords (e.g., "Have I ever...")
+    const foreverKeywords = /\b(ever|all time|history|total|entire|life)\b/i;
     if (foreverKeywords.test(normalized)) {
-        startDate = new Date("2000-01-01"); // Search from the beginning
+        startDate = new Date("2000-01-01"); // Effectively "since beginning"
     } else {
-        // Month detection (Existing logic)
+        // Check for specific months
         const monthNames = ["january", "february", "march", "april", "may", "june", 
                             "july", "august", "september", "october", "november", "december"];
         const currentYear = new Date().getFullYear();
@@ -1563,7 +1567,7 @@ function processSimpleQueryDirectly(question, queryType) {
     
     const helperData = getHelperListsData(); 
 
-    // 2. Category & Vendor detection (Existing Logic)
+    // --- 2. CATEGORY & VENDOR DETECTION ---
     const categories = helperData.primaryCategories || [];
     for (const category of categories) {
         if (normalized.includes(category.toLowerCase())) {
@@ -1590,22 +1594,23 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // 3. Amount filters
+    // --- 3. AMOUNT FILTERS ---
     const amountMatches = normalized.match(/(?:over|above|more than|greater than|exceeds) (\d+(?:\.\d+)?)/i);
     if (amountMatches && amountMatches[1]) {
         filterParams.minAmount = parseFloat(amountMatches[1]);
     }
 
-    // 4. ROBUST TEXT SEARCH FALLBACK
+    // --- 4. ROBUST TEXT SEARCH CLEANING (The Fix) ---
     if (!filterParams.primaryCategory && !filterParams.subcategory && !filterParams.vendor) {
-        // Expanded list of conversational filler words to ignore
+        // List of conversational filler words to ignore
         const fillerWords = [
-            "show", "list", "find", "get", "search", "fetch", "check",
-            "me", "my", "our", "us", "all", "i", "we", "you",
+            "show", "list", "find", "get", "search", "fetch", "check", "tell",
+            "me", "my", "our", "us", "i", "we", "you",
             "expenses", "purchases", "spent", "bought", "buy", "transactions", "records",
-            "for", "in", "on", "at", "from",
-            "have", "has", "had", "did", "do", "does", "can", "could",
-            "ever", "a", "an", "the", "any"
+            "for", "in", "on", "at", "from", "with",
+            "have", "has", "had", "did", "do", "does", "can", "could", "will", "would",
+            "how", "many", "much", "times", "often", "count", // <--- Added these
+            "ever", "a", "an", "the", "any", "all", "total"
         ];
 
         // Create regex to match whole words only (\b)
@@ -1623,7 +1628,7 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // Get the data
+    // --- 5. GET DATA & FORMAT RESPONSE ---
     const expenseData = getExpenseDataForAI(filterParams);
     
     if (expenseData.error) {
@@ -1634,24 +1639,25 @@ function processSimpleQueryDirectly(question, queryType) {
         return {
             type: 'text',
             summary: 'No matching expenses found',
-            content: `I couldn't find any expenses matching "${filterParams.textSearch || question}".`
+            content: `I searched for "${filterParams.textSearch || 'your request'}" but found 0 records.`
         };
     }
     
-    // Format response
-    let summaryText = `Here are your expenses matching "${filterParams.textSearch || question}"`;
-    if (filterParams.primaryCategory) summaryText = `Here are your ${filterParams.primaryCategory} expenses`;
-    else if (filterParams.subcategory) summaryText = `Here are your ${filterParams.subcategory} expenses`;
-    else if (filterParams.vendor) summaryText = `Here are your expenses at ${filterParams.vendor}`;
+    // Smart Summary Generation
+    let summaryText = `Found ${expenseData.count} transactions`;
     
-    // Add date context to summary if it was "ever"
+    if (filterParams.textSearch) summaryText += ` matching "${filterParams.textSearch}"`;
+    else if (filterParams.vendor) summaryText += ` at ${filterParams.vendor}`;
+    else if (filterParams.primaryCategory) summaryText += ` for ${filterParams.primaryCategory}`;
+    
+    // Add "All Time" context if relevant
     if (foreverKeywords.test(normalized)) {
         summaryText += " (All Time)";
     }
 
     return {
         type: 'table',
-        summary: `${summaryText} (Total: ${DEFAULT_CURRENCY_SYMBOL}${expenseData.totalAmount})`,
+        summary: `${summaryText}. Total: ${DEFAULT_CURRENCY_SYMBOL}${expenseData.totalAmount}`,
         data: {
             data: expenseData.data,
             columns: ["date", "description", "primaryCategory", "vendor", "amount", "receiptUrl"]
