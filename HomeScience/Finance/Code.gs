@@ -1526,36 +1526,44 @@ function classifyQueryComplexity(question) {
  */
 function processSimpleQueryDirectly(question, queryType) {
     const userDetails = getUserDetails();
-    // ... (Date setup remains the same) ...
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const normalized = question.toLowerCase();
+    
+    // 1. INTELLIGENT DATE LOGIC
+    // Default: Last 90 days
+    let startDate = new Date();
+    startDate.setDate(startDate.getDate() - 90);
+    let endDate = new Date();
+    
+    // Check for "Forever" keywords
+    const foreverKeywords = /\b(ever|all time|history|total|entire)\b/i;
+    if (foreverKeywords.test(normalized)) {
+        startDate = new Date("2000-01-01"); // Search from the beginning
+    } else {
+        // Month detection (Existing logic)
+        const monthNames = ["january", "february", "march", "april", "may", "june", 
+                            "july", "august", "september", "october", "november", "december"];
+        const currentYear = new Date().getFullYear();
+        
+        for (let i = 0; i < monthNames.length; i++) {
+            if (normalized.includes(monthNames[i])) {
+                const monthIndex = i;
+                startDate = new Date(currentYear, monthIndex, 1);
+                endDate = new Date(currentYear, monthIndex + 1, 0); // Last day of month
+                break;
+            }
+        }
+    }
     
     let filterParams = {
         userEmail: userDetails.email,
         costCenter: userDetails.userCostCenter,
-        startDate: ninetyDaysAgo.toISOString().slice(0, 10),
-        endDate: new Date().toISOString().slice(0, 10)
+        startDate: Utilities.formatDate(startDate, Session.getScriptTimeZone(), "yyyy-MM-dd"),
+        endDate: Utilities.formatDate(endDate, Session.getScriptTimeZone(), "yyyy-MM-dd")
     };
     
-    const normalized = question.toLowerCase();
     const helperData = getHelperListsData(); 
 
-    // 1. Month detection
-    const monthNames = ["january", "february", "march", "april", "may", "june", 
-                        "july", "august", "september", "october", "november", "december"];
-    const currentYear = new Date().getFullYear();
-    
-    for (let i = 0; i < monthNames.length; i++) {
-        if (normalized.includes(monthNames[i])) {
-            const monthIndex = i;
-            filterParams.startDate = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-01`;
-            const lastDay = new Date(currentYear, monthIndex + 1, 0).getDate();
-            filterParams.endDate = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-${lastDay}`;
-            break;
-        }
-    }
-    
-    // 2. Category & Vendor detection
+    // 2. Category & Vendor detection (Existing Logic)
     const categories = helperData.primaryCategories || [];
     for (const category of categories) {
         if (normalized.includes(category.toLowerCase())) {
@@ -1564,7 +1572,6 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
 
-    // 3. Subcategory detection
     if (!filterParams.primaryCategory) {
         const subcats = helperData.allUniqueSubcategories || [];
         for (const subcat of subcats) {
@@ -1583,30 +1590,36 @@ function processSimpleQueryDirectly(question, queryType) {
         }
     }
     
-    // 4. Amount filters
+    // 3. Amount filters
     const amountMatches = normalized.match(/(?:over|above|more than|greater than|exceeds) (\d+(?:\.\d+)?)/i);
     if (amountMatches && amountMatches[1]) {
         filterParams.minAmount = parseFloat(amountMatches[1]);
     }
 
-    // 5. FIXED TEXT SEARCH LOGIC
+    // 4. ROBUST TEXT SEARCH FALLBACK
     if (!filterParams.primaryCategory && !filterParams.subcategory && !filterParams.vendor) {
-        // List of words to SCRUB from the query
+        // Expanded list of conversational filler words to ignore
         const fillerWords = [
-            "show", "list", "find", "get", "search", "fetch",
-            "me", "my", "our", "us", "all",
-            "expenses", "purchases", "spent", "bought", "transactions", "records",
-            "for", "in", "on", "at"
+            "show", "list", "find", "get", "search", "fetch", "check",
+            "me", "my", "our", "us", "all", "i", "we", "you",
+            "expenses", "purchases", "spent", "bought", "buy", "transactions", "records",
+            "for", "in", "on", "at", "from",
+            "have", "has", "had", "did", "do", "does", "can", "could",
+            "ever", "a", "an", "the", "any"
         ];
 
-        // Create a global regex that matches any of these words as a whole word (\b)
+        // Create regex to match whole words only (\b)
         const fillerRegex = new RegExp(`\\b(${fillerWords.join('|')})\\b`, 'gi');
-
-        // Remove filler words and clean up extra spaces
-        const cleanQuery = normalized.replace(fillerRegex, '').replace(/\s+/g, ' ').trim();
+        
+        // Remove fillers AND punctuation (like ?)
+        let cleanQuery = normalized
+            .replace(fillerRegex, '')       // Remove words
+            .replace(/[?.,!]/g, '')         // Remove punctuation
+            .replace(/\s+/g, ' ')           // Collapse spaces
+            .trim();
         
         if (cleanQuery.length > 0) {
-            filterParams.textSearch = cleanQuery; // Will now be just "bread"
+            filterParams.textSearch = cleanQuery;
         }
     }
     
@@ -1621,7 +1634,7 @@ function processSimpleQueryDirectly(question, queryType) {
         return {
             type: 'text',
             summary: 'No matching expenses found',
-            content: `I couldn't find any expenses matching "${question}". Try adjusting your search terms.`
+            content: `I couldn't find any expenses matching "${filterParams.textSearch || question}".`
         };
     }
     
@@ -1631,6 +1644,11 @@ function processSimpleQueryDirectly(question, queryType) {
     else if (filterParams.subcategory) summaryText = `Here are your ${filterParams.subcategory} expenses`;
     else if (filterParams.vendor) summaryText = `Here are your expenses at ${filterParams.vendor}`;
     
+    // Add date context to summary if it was "ever"
+    if (foreverKeywords.test(normalized)) {
+        summaryText += " (All Time)";
+    }
+
     return {
         type: 'table',
         summary: `${summaryText} (Total: ${DEFAULT_CURRENCY_SYMBOL}${expenseData.totalAmount})`,
